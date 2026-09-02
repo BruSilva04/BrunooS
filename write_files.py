@@ -1,4 +1,6 @@
-import Phaser from 'phaser';
+import path
+with open('game/src/scenes/MenuScene.js', 'w', encoding='utf-8') as f:
+    f.write('''import Phaser from 'phaser';
 import { W, H, BETS, state } from '../config.js';
 
 export default class MenuScene extends Phaser.Scene {
@@ -75,7 +77,7 @@ export default class MenuScene extends Phaser.Scene {
       fontFamily: 'Arial, sans-serif',
       color: '#7bd4ea'
     });
-    this.add.text(30, 39, 'R$ ' + state.balance.toFixed(2), {
+    this.add.text(30, 39, f"R$ {state.balance.toFixed(2)}", {
       fontSize: '17px',
       fontFamily: '"Arial Black", Arial, sans-serif',
       color: '#ffffff'
@@ -96,8 +98,8 @@ export default class MenuScene extends Phaser.Scene {
     this.tweens.add({ targets: halo, scale: 1.12, alpha: 0.22, duration: 1300, yoyo: true, repeat: -1 });
     this.tweens.add({ targets: halo2, scale: 1.08, alpha: 0.1, duration: 1800, yoyo: true, repeat: -1 });
 
-    this.add.text(W / 2, 124, 'mermaid', { fontSize: '74px' }).setOrigin(0.5);
-    this.add.text(W / 2, 198, 'SEREIA DO TESOURN', {
+    this.add.text(W / 2, 124, '?????', { fontSize: '74px' }).setOrigin(0.5);
+    this.add.text(W / 2, 198, 'SEREIA DO TESOURO', {
       fontSize: '24px',
       fontFamily: '"Arial Black", Arial, sans-serif',
       color: '#ffe08a',
@@ -105,14 +107,14 @@ export default class MenuScene extends Phaser.Scene {
       strokeThickness: 4
     }).setOrigin(0.5);
 
-    this.add.text(W / 2, 226, 'Resgate antes da marÃ© virar', {
+    this.add.text(W / 2, 226, 'Resgate antes da maré virar', {
       fontSize: '13px',
       fontFamily: 'Arial, sans-serif',
       color: '#a7eaff'
     }).setOrigin(0.5);
 
     state.history.forEach((multVal, index) => {
-      const valStr = multVal.toFixed(2) + 'x';
+      const valStr = ${multVal.toFixed(2)}x;
       const x = 34 + index * 70;
       const box = this.add.graphics();
 
@@ -127,6 +129,7 @@ export default class MenuScene extends Phaser.Scene {
       box.fillRoundedRect(x, 256, 56, 28, 7);
       box.lineStyle(1, borderCol, 0.45);
       box.strokeRoundedRect(x, 256, 56, 28, 7);
+
       this.add.text(x + 28, 262, valStr, {
         fontSize: '12px',
         fontFamily: '"Arial Black", Arial, sans-serif',
@@ -152,7 +155,8 @@ export default class MenuScene extends Phaser.Scene {
       fontFamily: '"Arial Black", Arial, sans-serif',
       color: '#68cde7'
     });
-    this.betText = this.add.text(px + 18, py + 34, 'R$ ' + this.bet.toFixed(2), {
+
+    this.betText = this.add.text(px + 18, py + 34, f"R$ {this.bet.toFixed(2)}", {
       fontSize: '32px',
       fontFamily: '"Arial Black", Arial, sans-serif',
       color: '#ffffff'
@@ -170,19 +174,20 @@ export default class MenuScene extends Phaser.Scene {
 
   _createBetChip(value, x, y) {
     const bg = this.add.graphics();
-    const label = this.add.text(x + 27, y + 14, '' + value, {
+    const label = this.add.text(x + 27, y + 14, f"{value}", {
       fontSize: '15px',
       fontFamily: '"Arial Black", Arial, sans-serif',
       color: '#bdefff'
     }).setOrigin(0.5);
 
     const hit = this.add.zone(x + 27, y + 14, 54, 34).setInteractive({ useHandCursor: true });
-    hit.on('pointerout', () => {
+    hit.on('pointerdown', () => {
       this.bet = value;
-      this.betText.setText('R$ ' + this.bet.toFixed(2));
+      this.betText.setText(f"R$ {this.bet.toFixed(2)}");
       this._refreshBetChips();
       this.cameras.main.flash(70, 16, 210, 255);
     });
+
     this.betButtons.push({ value, bg, label });
   }
 
@@ -215,7 +220,7 @@ export default class MenuScene extends Phaser.Scene {
       fontFamily: '"Arial Black", Arial, sans-serif',
       color: '#ffffff',
       stroke: '#064e3b',
-      strokeThickness: 4
+      strokeThickness: 3
     }).setOrigin(0.5);
 
     const hit = this.add.zone(W / 2, y + 30, W - 88, 60).setInteractive({ useHandCursor: true });
@@ -223,7 +228,7 @@ export default class MenuScene extends Phaser.Scene {
     hit.on('pointerout', () => label.setScale(1));
     hit.on('pointerdown', () => this.scene.start('Game', { bet: this.bet }));
 
-    this.tweens.add({ targets: [bg, label], y: '-=4', duration: 900, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
+    this.tweens.add({ targets: [bg, label], y: '-=4', duration: 900, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
   }
 
   _drawFooter() {
@@ -251,3 +256,4 @@ export default class MenuScene extends Phaser.Scene {
     });
   }
 }
+''')

@@ -1,9 +1,11 @@
 import Phaser from 'phaser';
-import { W, H, OBS_DELAY_START, GEM_DELAY, MULT_TICK, GEM_BONUS, WS_URL } from '../config.js';
+import { W, H, OBS_DELAY_START, GEM_DELAY, MULT_TICK, GEM_BONUS, WS_URL, state, addHistory } from '../config.js';
 import Mermaid from '../objects/Mermaid.js';
 import Obstacle from '../objects/Obstacle.js';
 import Gem from '../objects/Gem.js';
 import HUD from '../objects/HUD.js';
+import SoundManager from '../utils/SoundManager.js';
+import ParticleEffects from '../objects/ParticleEffects.js';
 
 export default class GameScene extends Phaser.Scene {
   constructor() { 
@@ -24,6 +26,9 @@ export default class GameScene extends Phaser.Scene {
   }
 
   create() {
+    this.sounds = new SoundManager();
+    this.particles = new ParticleEffects(this);
+
     this._bgGfx = this.add.graphics();
     this._floorGfx = this.add.graphics();
     this._drawBg(0);
@@ -31,9 +36,9 @@ export default class GameScene extends Phaser.Scene {
     this.merm = new Mermaid(this);
 
     this._tObs  = this.time.addEvent({ delay: OBS_DELAY_START, callback: this._spawnObs,  callbackScope: this, loop: true });
-    this._tGem  = this.time.addEvent({ delay: GEM_DELAY,       callback: this._spawnGem,  callbackScope: this, loop: true });
-    this._tBub  = this.time.addEvent({ delay: 260,             callback: this._spawnBub,  callbackScope: this, loop: true });
-    this._tMult = this.time.addEvent({ delay: 100,             callback: this._tickMult,  callbackScope: this, loop: true });
+    this._tGem  = this.time.addEvent({ delay: GEM_DELAY,      callback: this._spawnGem,  callbackScope: this, loop: true });
+    this._tBub  = this.time.addEvent({ delay: 260, callback: this._spawnBub,  callbackScope: this, loop: true });
+    this._tMult = this.time.addEvent({ delay: 100, callback: this._tickMult,  callbackScope: this, loop: true });
 
     this.hud = new HUD(this, this.bet);
     this.hud.onCashOut(() => {
@@ -41,10 +46,13 @@ export default class GameScene extends Phaser.Scene {
     });
 
     this.input.on('pointerdown', (p) => {
-      if (!this.dead && !this.cashed && p.y < H - 90) this.merm.flap();
+      if (!this.dead && !this.cashed && p.y < H - 90) {
+        this.merm.flap();
+        this.sounds.playSwim();
+      }
     });
     this._space = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
-    
+
     this._connectWS();
   }
   
@@ -58,7 +66,7 @@ export default class GameScene extends Phaser.Scene {
         const data = JSON.parse(event.data);
         if (data.type === 'round_started') {
           this.roundId = data.round_id;
-          this.crashPoint = data.crash_point; // server crash ceiling
+          this.crashPoint = data.crash_point;
         } else if (data.type === 'cash_out_result') {
           if (data.success) {
             this._showResult(true, data.payout);
@@ -66,19 +74,12 @@ export default class GameScene extends Phaser.Scene {
             this._showResult(false, 0);
           }
         } else if (data.type === 'death_registered') {
-          // server confirmed death
-          console.log(`Crash point was: ${data.crash_point}x`);
+          console.log('Crash point was: ' + data.crash_point + 'x');
         }
       };
-      this.ws.onerror = () => {
-        console.warn("WS error. Falling back to local mode.");
-      };
-      this.ws.onclose = () => {
-        console.warn("WS closed.");
-      };
-    } catch (e) {
-      console.warn("WS init failed. Falling back to local mode.", e);
-    }
+      this.ws.onerror = () => {};
+      this.ws.onclose = () => {};
+    } catch (e) {}
   }
 
   _drawBg(depth) {
@@ -89,7 +90,7 @@ export default class GameScene extends Phaser.Scene {
     const topHex = Phaser.Display.Color.Interpolate.ColorWithColor(
       { r: 0, g: 20, b: 80 }, { r: 0, g: 2, b: 10 }, 100, t * 100);
     const botHex = Phaser.Display.Color.Interpolate.ColorWithColor(
-      { r: 0, g: 8,  b: 32 }, { r: 0, g: 0, b: 5  }, 100, t * 100);
+      { r: 0, g: 8, b: 32 }, { r: 0, g: 0, b: 5 }, 100, t * 100);
 
     const tc = Phaser.Display.Color.GetColor(topHex.r, topHex.g, topHex.b);
     const bc = Phaser.Display.Color.GetColor(botHex.r, botHex.g, botHex.b);
@@ -150,13 +151,16 @@ export default class GameScene extends Phaser.Scene {
   _cashOut() {
     this.cashed = true;
     this._stopTimers();
-    
+    this.sounds.playCashout();
+    this.particles.emitCashoutShower();
+
+    const won = +(this.bet * this.mult).toFixed(2);
+    state.balance += (won - this.bet);
+    addHistory(this.mult);
+
     if (this.ws && this.ws.readyState === WebSocket.OPEN && this.roundId) {
       this.ws.send(JSON.stringify({ action: 'cash_out', round_id: this.roundId, client_mult: this.mult }));
-      // we'll get the result back from WS
     } else {
-      // local fallback
-      const won = +(this.bet * this.mult).toFixed(2);
       this._showResult(true, won);
     }
   }
@@ -164,9 +168,13 @@ export default class GameScene extends Phaser.Scene {
   _die() {
     if (this.dead || this.cashed) return;
     this.dead = true;
+    this.sounds.playCrash();
     this.cameras.main.shake(280, 0.012);
     this._stopTimers();
-    
+
+    state.balance = Math.max(0, state.balance - this.bet);
+    addHistory(this.mult);
+
     if (this.ws && this.ws.readyState === WebSocket.OPEN && this.roundId) {
       this.ws.send(JSON.stringify({ action: 'death', round_id: this.roundId, client_mult: this.mult }));
     }
@@ -175,7 +183,8 @@ export default class GameScene extends Phaser.Scene {
   }
 
   _stopTimers() {
-    [this._tObs, this._tGem, this._tBub, this._tMult].forEach(t => { if (t) t.destroy(); });
+    [this._tObs, this._tGem, this._tBub, this._tMult].forEach(t => {
+ if (t) t.destroy(); });
   }
 
   _showResult(won, amount) {
@@ -189,18 +198,21 @@ export default class GameScene extends Phaser.Scene {
     if (this.dead || this.cashed) return;
     const dt = delta / 1000;
 
-    this.speed = 170 + (this.mult - 1) * 52;
+    this.speed = 170 + (this.mult - 1) * 58;
 
-    // crash point ceiling — invisible house edge
     if (this.crashPoint && this.mult >= this.crashPoint) {
       this._die();
       return;
     }
 
-    this._drawBg(this.mult - 1);
+    this._drawBg(-this.mult - 1);
 
-    if (Phaser.Input.Keyboard.JustDown(this._space)) this.merm.flap();
+    if (Phaser.Input.Keyboard.JustDown(this._space)) {
+      this.merm.flap();
+      this.sounds.playSwim();
+    }
     this.merm.update(dt);
+    this.particles.emitBubbleTrail(this.merm.x, this.merm.y);
 
     if (this.merm.isOutOfBounds()) { this._die(); return; }
 
@@ -224,13 +236,15 @@ export default class GameScene extends Phaser.Scene {
 
       if (g.checkCollect(this.merm.x, this.merm.y)) {
         this.mult = +(this.mult + GEM_BONUS).toFixed(3);
+        this.sounds.playGem();
         this.cameras.main.flash(70, 30, 160, 80);
+        this.particles.emitGemBurst(g.sprite.x, g.sprite.y);
         this._showBonus(g.sprite.x, g.sprite.y);
         g.destroy(); 
         this._gems.splice(i, 1);
         continue;
       }
-      if (g.isOffScreen()) { 
+      if (g.isOffScreen()) {
         g.destroy(); 
         this._gems.splice(i, 1); 
       }
@@ -244,7 +258,7 @@ export default class GameScene extends Phaser.Scene {
 
     this.hud.updateMult(this.mult, this.bet);
 
-    if (this.mult > 2.5 && this._tObs.delay > 1400) this._tObs.delay = 1400;
+    if (this.mult > 2.5 && this._TObs.delay > 1400) this._tObs.delay = 1400;
     if (this.mult > 4.0 && this._tObs.delay > 1100) this._tObs.delay = 1100;
   }
 
@@ -257,13 +271,6 @@ export default class GameScene extends Phaser.Scene {
       strokeThickness: 3
     }).setOrigin(0.5);
 
-    this.tweens.add({
-      targets: txt,
-      y: y - 58,
-      alpha: 0,
-      duration: 620,
-      ease: 'Sine.easeOut',
-      onComplete: () => txt.destroy()
-    });
+    this.tweens.add({ targets: txt, y: y - 58, alpha: 0, duration: 620, ease: 'Sine.easeOut', onComplete: () => txt.destroy() });
   }
 }
