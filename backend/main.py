@@ -6,7 +6,10 @@ from db.database import init_db
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await init_db()
+    try:
+        await init_db()
+    except Exception as e:
+        print(f"DB init notice: {e}")
     yield
 
 app = FastAPI(
