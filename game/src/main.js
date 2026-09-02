@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { W, H } from './config.js';
 import BootScene from './scenes/BootScene.js';
+import LobbyScene from './scenes/LobbyScene.js';
 import MenuScene from './scenes/MenuScene.js';
 import GameScene from './scenes/GameScene.js';
 
@@ -10,7 +11,7 @@ new Phaser.Game({
   height: H,
   parent: 'game',
   backgroundColor: '#000510',
-  scene: [BootScene, MenuScene, GameScene],
+  scene: [BootScene, LobbyScene, MenuScene, GameScene],
   scale: {
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH

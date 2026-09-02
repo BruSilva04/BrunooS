@@ -190,7 +190,7 @@ export default class GameScene extends Phaser.Scene {
   _showResult(won, amount) {
     this.hud.showResult(won, amount, this.mult, this.bet);
     this.time.delayedCall(500, () => {
-      this.input.once('pointerdown', () => this.scene.start('Menu'));
+      this.input.once('pointerdown', () => this.scene.start('Lobby', { balance: novoSaldo }));
     });
   }
 
