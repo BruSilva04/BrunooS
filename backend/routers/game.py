@@ -1,9 +1,9 @@
 import json
 import uuid
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
-from ..services.casino import generate_crash_point, calculate_payout
-from ..services.provably_fair import generate_server_seed, hash_seed
-from ..db.database import save_round, update_round
+from services.casino import generate_crash_point, calculate_payout
+from services.provably_fair import generate_server_seed, hash_seed
+from db.database import save_round, update_round
 
 router = APIRouter()
 

@@ -1,4 +1,4 @@
-from .provably_fair import generate_hmac
+from services.provably_fair import generate_hmac
 
 HOUSE_EDGE = 0.05  # 5% house edge → 95% RTP
 
