@@ -1,0 +1,535 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Sereia do Tesouro 🧜‍♀️</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/phaser/3.60.0/phaser.min.js"></script>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #000510;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 100dvh;
+    overflow: hidden;
+    touch-action: none;
+  }
+  #game canvas { display: block; }
+</style>
+</head>
+<body>
+<div id="game"></div>
+<script>
+
+// ══════════════════════════════════════════════════════
+//  CONSTANTES GLOBAIS
+// ══════════════════════════════════════════════════════
+const W = 390, H = 680;
+const BETS = [2, 5, 10, 20, 50];
+const GRAVITY   = 880;
+const FLAP      = -430;
+const OBS_DELAY_START = 2000;  // ms entre obstáculos
+const GEM_DELAY = 800;
+const MULT_TICK = 0.012;       // ganho de multiplicador por 100ms
+const GEM_BONUS = 0.07;        // bonus ao coletar diamante
+
+// ══════════════════════════════════════════════════════
+//  CENA: MENU
+// ══════════════════════════════════════════════════════
+class MenuScene extends Phaser.Scene {
+  constructor() { super({ key: 'Menu' }); }
+
+  create() {
+    this.bet = 5;
+    this._drawOcean();
+    this._drawDecor();
+    this._drawTitle();
+    this._drawBetPanel();
+    this._drawPlayBtn();
+    this._drawFooter();
+    this._animateDecor();
+  }
+
+  _drawOcean() {
+    const g = this.add.graphics();
+    g.fillGradientStyle(0x000e3d, 0x000e3d, 0x000510, 0x000510, 1);
+    g.fillRect(0, 0, W, H);
+
+    // raios de luz difusos no topo
+    for (let i = 0; i < 5; i++) {
+      g.fillStyle(0x1a5fff, 0.03 + i * 0.005);
+      const x = 40 + i * 70;
+      g.fillTriangle(x - 15, 0, x + 15, 0, x + 30, H * 0.55);
+    }
+
+    // fundo do mar
+    g.fillStyle(0x00040f, 0.7);
+    g.fillRect(0, H * 0.78, W, H * 0.22);
+    // pedras
+    [30,90,160,240,300,350].forEach(x => {
+      const h = Phaser.Math.Between(18, 38);
+      g.fillStyle(0x0a1a2a, 1);
+      g.fillEllipse(x, H - 8, 40, h);
+    });
+  }
+
+  _drawDecor() {
+    this.decorItems = [];
+    const emojis = ['🐠','🐡','🦑','🦀','🐙','🐚','🌿'];
+    for (let i = 0; i < 7; i++) {
+      const t = this.add.text(
+        Phaser.Math.Between(10, W - 40),
+        Phaser.Math.Between(H * 0.6, H - 50),
+        Phaser.Utils.Array.GetRandom(emojis),
+        { fontSize: '22px' }
+      ).setAlpha(0.7);
+      this.decorItems.push(t);
+    }
+    // bolhas decorativas
+    this.bubbles = [];
+    for (let i = 0; i < 10; i++) {
+      const b = this.add.circle(
+        Phaser.Math.Between(0, W),
+        Phaser.Math.Between(0, H),
+        Phaser.Math.Between(3, 9),
+        0x5599ff, 0.15
+      );
+      this.bubbles.push({ obj: b, vy: Phaser.Math.Between(20, 55) });
+    }
+  }
+
+  _drawTitle() {
+    // glow atrás do emoji
+    const glow = this.add.circle(W / 2, 110, 52, 0x4488ff, 0.12);
+    this.tweens.add({ targets: glow, alpha: 0.22, duration: 1400, yoyo: true, repeat: -1 });
+
+    this.add.text(W / 2, 100, '🧜‍♀️', { fontSize: '68px' }).setOrigin(0.5);
+
+    this.add.text(W / 2, 180, 'SEREIA DO TESOURO', {
+      fontSize: '21px',
+      fontFamily: '"Arial Black", sans-serif',
+      color: '#FFD700',
+      stroke: '#a06000',
+      strokeThickness: 3,
+      letterSpacing: 2
+    }).setOrigin(0.5);
+
+    this.add.text(W / 2, 208, 'Mergulhe fundo • Colete tesouros • Resgate a tempo', {
+      fontSize: '11px',
+      color: '#6699bb',
+      fontStyle: 'italic'
+    }).setOrigin(0.5);
+  }
+
+  _drawBetPanel() {
+    const PX = W / 2 - 155, PY = 240, PW = 310, PH = 130;
+
+    const box = this.add.graphics();
+    box.fillStyle(0x000e30, 0.88);
+    box.fillRoundedRect(PX, PY, PW, PH, 14);
+    box.lineStyle(1, 0x1a3d7a);
+    box.strokeRoundedRect(PX, PY, PW, PH, 14);
+
+    this.add.text(W / 2, PY + 16, 'Valor da aposta', {
+      fontSize: '12px', color: '#6699cc', fontStyle: 'italic'
+    }).setOrigin(0.5);
+
+    // display aposta
+    this.betTxt = this.add.text(W / 2, PY + 60, `R$ ${this.bet.toFixed(2)}`, {
+      fontSize: '34px',
+      fontFamily: '"Arial Black", sans-serif',
+      color: '#ffffff'
+    }).setOrigin(0.5);
+
+    // botões − e +
+    const btnStyle = { fontSize: '28px', color: '#FFD700', backgroundColor: '#001d55', padding: { x: 16, y: 5 } };
+
+    const minus = this.add.text(PX + 28, PY + 60, '−', btnStyle)
+      .setOrigin(0.5).setInteractive({ useHandCursor: true });
+    const plus  = this.add.text(PX + PW - 28, PY + 60, '+', btnStyle)
+      .setOrigin(0.5).setInteractive({ useHandCursor: true });
+
+    minus.on('pointerdown', () => {
+      const i = BETS.indexOf(this.bet);
+      if (i > 0) { this.bet = BETS[i - 1]; this.betTxt.setText(`R$ ${this.bet.toFixed(2)}`); }
+    });
+    plus.on('pointerdown', () => {
+      const i = BETS.indexOf(this.bet);
+      if (i < BETS.length - 1) { this.bet = BETS[i + 1]; this.betTxt.setText(`R$ ${this.bet.toFixed(2)}`); }
+    });
+
+    this.add.text(W / 2, PY + 110, 'Toque na tela para nadar • Espaço também funciona', {
+      fontSize: '10px', color: '#445566'
+    }).setOrigin(0.5);
+  }
+
+  _drawPlayBtn() {
+    const btn = this.add.text(W / 2, 420, '  🌊  MERGULHAR  🌊  ', {
+      fontSize: '17px',
+      fontFamily: '"Arial Black", sans-serif',
+      color: '#ffffff',
+      backgroundColor: '#004db3',
+      padding: { x: 26, y: 15 }
+    }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+
+    btn.on('pointerover',  () => btn.setStyle({ backgroundColor: '#0066ff' }));
+    btn.on('pointerout',   () => btn.setStyle({ backgroundColor: '#004db3' }));
+    btn.on('pointerdown',  () => this.scene.start('Game', { bet: this.bet }));
+
+    this.tweens.add({ targets: btn, y: 420 - 4, duration: 900, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' });
+  }
+
+  _drawFooter() {
+    this.add.text(W / 2, H - 18, '18+ • Jogue com responsabilidade', {
+      fontSize: '10px', color: '#223344'
+    }).setOrigin(0.5);
+  }
+
+  _animateDecor() {
+    // bolhas sobem
+    this.time.addEvent({
+      delay: 16, loop: true, callback: () => {
+        this.bubbles.forEach(b => {
+          b.obj.y -= b.vy * 0.016;
+          if (b.obj.y < -10) {
+            b.obj.x = Phaser.Math.Between(0, W);
+            b.obj.y = H + 10;
+          }
+        });
+      }
+    });
+  }
+}
+
+// ══════════════════════════════════════════════════════
+//  CENA: GAME
+// ══════════════════════════════════════════════════════
+class GameScene extends Phaser.Scene {
+  constructor() { super({ key: 'Game' }); }
+
+  // ── init ─────────────────────────────────────────────
+  init(data) {
+    this.bet    = data.bet;
+    this.mult   = 1.00;
+    this.dead   = false;
+    this.cashed = false;
+    this.speed  = 170;
+    this._obs   = [];      // { top, bot, gapY, GAP }
+    this._gems  = [];      // Phaser.GameObjects.Text
+    this._bubs  = [];      // { obj, vy }
+  }
+
+  // ── create ───────────────────────────────────────────
+  create() {
+    this._bgGfx = this.add.graphics();
+    this._drawBg(0);
+
+    // Sereia
+    this.merm = this.add.text(75, H / 2, '🧜‍♀️', { fontSize: '40px' }).setOrigin(0.5);
+    this.vy   = 0;
+
+    // Timers
+    this._tObs  = this.time.addEvent({ delay: OBS_DELAY_START, callback: this._spawnObs,  callbackScope: this, loop: true });
+    this._tGem  = this.time.addEvent({ delay: GEM_DELAY,       callback: this._spawnGem,  callbackScope: this, loop: true });
+    this._tBub  = this.time.addEvent({ delay: 260,             callback: this._spawnBub,  callbackScope: this, loop: true });
+    this._tMult = this.time.addEvent({ delay: 100,             callback: this._tickMult,  callbackScope: this, loop: true });
+
+    // HUD
+    this._buildHUD();
+
+    // Input
+    this.input.on('pointerdown', (p) => {
+      if (!this.dead && !this.cashed && p.y < H - 90) this.vy = FLAP;
+    });
+    this._space = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
+  }
+
+  // ── background dinâmico ──────────────────────────────
+  _drawBg(depth) {
+    this._bgGfx.clear();
+    const t = Math.min(depth / 6, 1);
+
+    // cores interpoladas conforme profundidade
+    const topHex = Phaser.Display.Color.Interpolate.ColorWithColor(
+      { r: 0, g: 20, b: 80 }, { r: 0, g: 2, b: 10 }, 100, t * 100);
+    const botHex = Phaser.Display.Color.Interpolate.ColorWithColor(
+      { r: 0, g: 8,  b: 32 }, { r: 0, g: 0, b: 5  }, 100, t * 100);
+
+    const tc = Phaser.Display.Color.GetColor(topHex.r, topHex.g, topHex.b);
+    const bc = Phaser.Display.Color.GetColor(botHex.r, botHex.g, botHex.b);
+
+    this._bgGfx.fillGradientStyle(tc, tc, bc, bc, 1);
+    this._bgGfx.fillRect(0, 0, W, H);
+
+    // raios de luz (desaparecem no fundo)
+    if (t < 0.75) {
+      const alpha = (0.75 - t) * 0.07;
+      for (let i = 0; i < 4; i++) {
+        this._bgGfx.fillStyle(0x2255ff, alpha);
+        const rx = 50 + i * 85;
+        const swing = Math.sin(this.time.now / 1600 + i) * 25;
+        this._bgGfx.fillTriangle(rx - 18, 0, rx + 18, 0, rx + swing, H * 0.65);
+      }
+    }
+
+    // partículas de bioluminescência no fundo profundo
+    if (t > 0.4) {
+      for (let i = 0; i < 6; i++) {
+        const bx = (i * 67 + Math.sin(this.time.now / 900 + i) * 15) % W;
+        const by = H * 0.7 + (i * 23) % (H * 0.28);
+        this._bgGfx.fillStyle(0x00ffaa, (t - 0.4) * 0.07);
+        this._bgGfx.fillCircle(bx, by, 3);
+      }
+    }
+  }
+
+  // ── HUD ──────────────────────────────────────────────
+  _buildHUD() {
+    const hudBg = this.add.graphics();
+    hudBg.fillStyle(0x000000, 0.5);
+    hudBg.fillRect(0, 0, W, 74);
+
+    // multiplicador central
+    this._multTxt = this.add.text(W / 2, 10, '1.00×', {
+      fontSize: '32px',
+      fontFamily: '"Arial Black", sans-serif',
+      color: '#00ffaa',
+      stroke: '#004422',
+      strokeThickness: 3
+    }).setOrigin(0.5, 0);
+
+    // aposta
+    this.add.text(14, 20, 'Aposta', { fontSize: '11px', color: '#5588bb' });
+    this.add.text(14, 36, `R$ ${this.bet.toFixed(2)}`, {
+      fontSize: '15px', fontFamily: '"Arial Black", sans-serif', color: '#ffffff'
+    });
+
+    // ganho potencial
+    this.add.text(W - 14, 20, 'Ganho potencial', { fontSize: '11px', color: '#ccaa00' }).setOrigin(1, 0);
+    this._gainTxt = this.add.text(W - 14, 36, `R$ ${this.bet.toFixed(2)}`, {
+      fontSize: '15px', fontFamily: '"Arial Black", sans-serif', color: '#FFD700'
+    }).setOrigin(1, 0);
+
+    // botão cash out
+    this._btnCash = this.add.text(W / 2, H - 46, '  💰  CASH OUT  ', {
+      fontSize: '18px',
+      fontFamily: '"Arial Black", sans-serif',
+      color: '#ffffff',
+      backgroundColor: '#995500',
+      padding: { x: 24, y: 14 }
+    }).setOrigin(0.5).setInteractive({ useHandCursor: true });
+
+    this._btnCash.on('pointerdown', () => {
+      if (!this.dead && !this.cashed) this._cashOut();
+    });
+
+    // dica de controle
+    this._ctrlHint = this.add.text(W / 2, H - 88, '▲ TOQUE para nadar', {
+      fontSize: '11px', color: '#334455'
+    }).setOrigin(0.5);
+    this.tweens.add({
+      targets: this._ctrlHint, alpha: 0, delay: 2500,
+      duration: 800, onComplete: () => this._ctrlHint.destroy()
+    });
+  }
+
+  // ── spawn obstáculos ─────────────────────────────────
+  _spawnObs() {
+    if (this.dead || this.cashed) return;
+    const OBSTACLES = ['🦈', '🕸️', '🪤', '🦑'];
+    const emoji = Phaser.Utils.Array.GetRandom(OBSTACLES);
+    const GAP   = 138;
+    const gapY  = Phaser.Math.Between(130, H - 130);
+
+    const top = this.add.text(W + 30, gapY - GAP / 2 - 32, emoji, { fontSize: '36px' }).setOrigin(0.5);
+    const bot = this.add.text(W + 30, gapY + GAP / 2 + 32, emoji, { fontSize: '36px' }).setOrigin(0.5);
+    this._obs.push({ top, bot, gapY, GAP });
+  }
+
+  // ── spawn diamantes ──────────────────────────────────
+  _spawnGem() {
+    if (this.dead || this.cashed) return;
+    const y = Phaser.Math.Between(90, H - 90);
+    this._gems.push(this.add.text(W + 14, y, '💎', { fontSize: '24px' }).setOrigin(0.5));
+  }
+
+  // ── spawn bolhas ─────────────────────────────────────
+  _spawnBub() {
+    const b = this.add.circle(
+      Phaser.Math.Between(0, W), H + 8,
+      Phaser.Math.Between(2, 8), 0x66aaff, 0.2
+    );
+    this._bubs.push({ obj: b, vy: Phaser.Math.Between(35, 90) });
+  }
+
+  // ── tick multiplicador ───────────────────────────────
+  _tickMult() {
+    if (!this.dead && !this.cashed) {
+      this.mult = +(this.mult + MULT_TICK).toFixed(3);
+    }
+  }
+
+  // ── cash out ─────────────────────────────────────────
+  _cashOut() {
+    this.cashed = true;
+    const won = +(this.bet * this.mult).toFixed(2);
+    this._stopTimers();
+    this._showResult(true, won);
+  }
+
+  // ── morte ─────────────────────────────────────────────
+  _die() {
+    if (this.dead || this.cashed) return;
+    this.dead = true;
+    this.cameras.main.shake(280, 0.012);
+    this._stopTimers();
+    this._showResult(false, 0);
+  }
+
+  // ── parar timers ─────────────────────────────────────
+  _stopTimers() {
+    [this._tObs, this._tGem, this._tBub, this._tMult].forEach(t => { if (t) t.destroy(); });
+  }
+
+  // ── resultado ────────────────────────────────────────
+  _showResult(won, amount) {
+    this._btnCash.setVisible(false);
+
+    const PW = 300, PH = 185;
+    const PX = W / 2 - PW / 2, PY = H / 2 - PH / 2;
+
+    const panel = this.add.graphics();
+    panel.fillStyle(won ? 0x001e0e : 0x1a0000, 0.9);
+    panel.fillRoundedRect(PX, PY, PW, PH, 18);
+    panel.lineStyle(2, won ? 0x00ff88 : 0xff3333);
+    panel.strokeRoundedRect(PX, PY, PW, PH, 18);
+
+    if (won) {
+      this.add.text(W / 2, PY + 28, '💰 RESGATOU!', {
+        fontSize: '22px', fontFamily: '"Arial Black", sans-serif', color: '#FFD700'
+      }).setOrigin(0.5);
+      this.add.text(W / 2, PY + 72, `R$ ${amount.toFixed(2)}`, {
+        fontSize: '44px', fontFamily: '"Arial Black", sans-serif', color: '#00ff88'
+      }).setOrigin(0.5);
+      this.add.text(W / 2, PY + 122, `Multiplicador: ${this.mult.toFixed(2)}×`, {
+        fontSize: '15px', color: '#99ffcc'
+      }).setOrigin(0.5);
+      this.add.text(W / 2, PY + 155, 'Toque para jogar novamente', {
+        fontSize: '12px', color: '#336644'
+      }).setOrigin(0.5);
+    } else {
+      this.add.text(W / 2, PY + 28, '🦈 CAPTURADA!', {
+        fontSize: '22px', fontFamily: '"Arial Black", sans-serif', color: '#ff4444'
+      }).setOrigin(0.5);
+      this.add.text(W / 2, PY + 72, `‒ R$ ${this.bet.toFixed(2)}`, {
+        fontSize: '42px', fontFamily: '"Arial Black", sans-serif', color: '#ff6666'
+      }).setOrigin(0.5);
+      this.add.text(W / 2, PY + 122, `Chegou a ${this.mult.toFixed(2)}×`, {
+        fontSize: '15px', color: '#aa5555'
+      }).setOrigin(0.5);
+      this.add.text(W / 2, PY + 155, 'Toque para jogar novamente', {
+        fontSize: '12px', color: '#553333'
+      }).setOrigin(0.5);
+    }
+
+    this.time.delayedCall(500, () => {
+      this.input.once('pointerdown', () => this.scene.start('Menu'));
+    });
+  }
+
+  // ── update ───────────────────────────────────────────
+  update(time, delta) {
+    if (this.dead || this.cashed) return;
+    const dt = delta / 1000;
+
+    // velocidade cresce com multiplicador
+    this.speed = 170 + (this.mult - 1) * 52;
+
+    // background com profundidade visual
+    this._drawBg(this.mult - 1);
+
+    // física
+    if (Phaser.Input.Keyboard.JustDown(this._space)) this.vy = FLAP;
+    this.vy     += GRAVITY * dt;
+    this.merm.y += this.vy * dt;
+    this.merm.setAngle(Phaser.Math.Clamp(this.vy * 0.04, -22, 40));
+
+    // morte por borda
+    if (this.merm.y < 78 || this.merm.y > H - 78) { this._die(); return; }
+
+    // mover e colisão — obstáculos
+    for (let i = this._obs.length - 1; i >= 0; i--) {
+      const o = this._obs[i];
+      o.top.x -= this.speed * dt;
+      o.bot.x -= this.speed * dt;
+
+      if (Math.abs(o.top.x - this.merm.x) < 28) {
+        const inGap = this.merm.y > o.gapY - o.GAP / 2 && this.merm.y < o.gapY + o.GAP / 2;
+        if (!inGap) { this._die(); return; }
+      }
+
+      if (o.top.x < -60) {
+        o.top.destroy(); o.bot.destroy();
+        this._obs.splice(i, 1);
+      }
+    }
+
+    // mover e colisão — diamantes
+    for (let i = this._gems.length - 1; i >= 0; i--) {
+      const g = this._gems[i];
+      g.x -= this.speed * dt;
+
+      if (Math.abs(g.x - this.merm.x) < 32 && Math.abs(g.y - this.merm.y) < 32) {
+        this.mult = +(this.mult + GEM_BONUS).toFixed(3);
+        this.cameras.main.flash(70, 30, 160, 80);
+        g.destroy(); this._gems.splice(i, 1);
+        continue;
+      }
+      if (g.x < -30) { g.destroy(); this._gems.splice(i, 1); }
+    }
+
+    // mover bolhas
+    for (let i = this._bubs.length - 1; i >= 0; i--) {
+      const b = this._bubs[i];
+      b.obj.y -= b.vy * dt;
+      if (b.obj.y < -12) { b.obj.destroy(); this._bubs.splice(i, 1); }
+    }
+
+    // HUD
+    this._multTxt.setText(`${this.mult.toFixed(2)}×`);
+    this._gainTxt.setText(`R$ ${+(this.bet * this.mult).toFixed(2)}`);
+
+    // cor do cash out conforme lucratividade
+    if (this.mult >= 2.0) {
+      this._btnCash.setStyle({ backgroundColor: '#008833' });
+    } else if (this.mult >= 1.5) {
+      this._btnCash.setStyle({ backgroundColor: '#777700' });
+    }
+
+    // dificuldade crescente — intervalo menor
+    if (this.mult > 2.5 && this._tObs.delay > 1400) this._tObs.delay = 1400;
+    if (this.mult > 4.0 && this._tObs.delay > 1100) this._tObs.delay = 1100;
+  }
+}
+
+// ══════════════════════════════════════════════════════
+//  BOOT DO PHASER
+// ══════════════════════════════════════════════════════
+new Phaser.Game({
+  type: Phaser.AUTO,
+  width: W,
+  height: H,
+  parent: 'game',
+  backgroundColor: '#000510',
+  scene: [MenuScene, GameScene],
+  scale: {
+    mode: Phaser.Scale.FIT,
+    autoCenter: Phaser.Scale.CENTER_BOTH
+  },
+  fps: { target: 60 }
+});
+</script>
+</body>
+</html>

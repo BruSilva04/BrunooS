@@ -1,0 +1,10 @@
+export const W = 390;
+export const H = 680;
+export const BETS = [2, 5, 10, 20, 50];
+export const GRAVITY = 880;
+export const FLAP = -430;
+export const OBS_DELAY_START = 2000;
+export const GEM_DELAY = 800;
+export const MULT_TICK = 0.012;
+export const GEM_BONUS = 0.07;
+export const WS_URL = 'ws://localhost:8000/ws/game';

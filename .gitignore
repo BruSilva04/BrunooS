@@ -1,0 +1,17 @@
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+
+# Build output
+dist/
+build/
+
+# Database & local data
+sereia.db
+*.sqlite
+*.sqlite3
+
+# Environment & logs
+.env
+*.log
