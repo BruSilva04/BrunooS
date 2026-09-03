@@ -44,9 +44,17 @@ async function request(path, options = {}) {
   } catch (error) {
     throw new Error(`Falha ao conectar com o backend em ${API_URL}`);
   }
-  const data = await response.json().catch(() => ({}));
+  const rawBody = await response.text();
+  let data = {};
+  try {
+    data = rawBody ? JSON.parse(rawBody) : {};
+  } catch {
+    data = {};
+  }
+
   if (!response.ok) {
-    throw new Error(data.detail || data.message || 'Falha de comunicacao');
+    const detail = data.detail || data.message || rawBody.slice(0, 120) || response.statusText;
+    throw new Error(`HTTP ${response.status} em ${API_URL}${path}: ${detail}`);
   }
   return data;
 }
