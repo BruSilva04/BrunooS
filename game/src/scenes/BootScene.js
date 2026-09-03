@@ -13,7 +13,7 @@ export default class BootScene extends Phaser.Scene {
     }).setOrigin(0.5);
 
     this.time.delayedCall(500, () => {
-      this.scene.start('Menu');
+      this.scene.start('Lobby');
     });
   }
 }

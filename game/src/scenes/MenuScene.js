@@ -96,8 +96,8 @@ export default class MenuScene extends Phaser.Scene {
     this.tweens.add({ targets: halo, scale: 1.12, alpha: 0.22, duration: 1300, yoyo: true, repeat: -1 });
     this.tweens.add({ targets: halo2, scale: 1.08, alpha: 0.1, duration: 1800, yoyo: true, repeat: -1 });
 
-    this.add.text(W / 2, 124, 'mermaid', { fontSize: '74px' }).setOrigin(0.5);
-    this.add.text(W / 2, 198, 'SEREIA DO TESOURN', {
+    this.add.text(W / 2, 124, '🧜‍♀️', { fontSize: '74px' }).setOrigin(0.5);
+    this.add.text(W / 2, 198, 'SEREIA DO TESOURO', {
       fontSize: '24px',
       fontFamily: '"Arial Black", Arial, sans-serif',
       color: '#ffe08a',
@@ -177,7 +177,7 @@ export default class MenuScene extends Phaser.Scene {
     }).setOrigin(0.5);
 
     const hit = this.add.zone(x + 27, y + 14, 54, 34).setInteractive({ useHandCursor: true });
-    hit.on('pointerout', () => {
+    hit.on('pointerdown', () => {
       this.bet = value;
       this.betText.setText('R$ ' + this.bet.toFixed(2));
       this._refreshBetChips();

@@ -23,6 +23,7 @@ export default class GameScene extends Phaser.Scene {
     this._bubs  = [];
     this.ws     = null;
     this.roundId = null;
+    this.resultShown = false;
   }
 
   create() {
@@ -66,15 +67,18 @@ export default class GameScene extends Phaser.Scene {
         const data = JSON.parse(event.data);
         if (data.type === 'round_started') {
           this.roundId = data.round_id;
-          this.crashPoint = data.crash_point;
         } else if (data.type === 'cash_out_result') {
           if (data.success) {
-            this._showResult(true, data.payout);
+            this._applyCashOutResult(data.payout, data.multiplier);
           } else {
-            this._showResult(false, 0);
+            this._applyLossResult(data.multiplier);
           }
+        } else if (data.type === 'round_crashed') {
+          this._serverCrash(data.multiplier);
         } else if (data.type === 'death_registered') {
           console.log('Crash point was: ' + data.crash_point + 'x');
+        } else if (data.type === 'error') {
+          this._handleServerError(data.message);
         }
       };
       this.ws.onerror = () => {};
@@ -155,12 +159,12 @@ export default class GameScene extends Phaser.Scene {
     this.particles.emitCashoutShower();
 
     const won = +(this.bet * this.mult).toFixed(2);
-    state.balance += (won - this.bet);
-    addHistory(this.mult);
 
     if (this.ws && this.ws.readyState === WebSocket.OPEN && this.roundId) {
       this.ws.send(JSON.stringify({ action: 'cash_out', round_id: this.roundId, client_mult: this.mult }));
     } else {
+      state.balance += (won - this.bet);
+      addHistory(this.mult);
       this._showResult(true, won);
     }
   }
@@ -172,13 +176,44 @@ export default class GameScene extends Phaser.Scene {
     this.cameras.main.shake(280, 0.012);
     this._stopTimers();
 
-    state.balance = Math.max(0, state.balance - this.bet);
-    addHistory(this.mult);
-
     if (this.ws && this.ws.readyState === WebSocket.OPEN && this.roundId) {
       this.ws.send(JSON.stringify({ action: 'death', round_id: this.roundId, client_mult: this.mult }));
     }
-    
+
+    this._applyLossResult(this.mult);
+  }
+
+  _serverCrash(multiplier) {
+    if (this.dead || this.cashed) return;
+    if (Number.isFinite(multiplier)) this.mult = multiplier;
+    this.dead = true;
+    this.sounds.playCrash();
+    this.cameras.main.shake(280, 0.012);
+    this._stopTimers();
+    this._applyLossResult(this.mult);
+  }
+
+  _handleServerError(message) {
+    console.warn('Game server error:', message);
+    if ((this.dead || this.cashed) && !this.resultShown) {
+      this._applyLossResult(this.mult);
+    }
+  }
+
+  _applyCashOutResult(payout, multiplier = this.mult) {
+    if (this.resultShown) return;
+    if (Number.isFinite(multiplier)) this.mult = multiplier;
+    const amount = Number.isFinite(payout) ? payout : +(this.bet * this.mult).toFixed(2);
+    state.balance += (amount - this.bet);
+    addHistory(this.mult);
+    this._showResult(true, amount);
+  }
+
+  _applyLossResult(multiplier = this.mult) {
+    if (this.resultShown) return;
+    if (Number.isFinite(multiplier)) this.mult = multiplier;
+    state.balance = Math.max(0, state.balance - this.bet);
+    addHistory(this.mult);
     this._showResult(false, 0);
   }
 
@@ -188,9 +223,11 @@ export default class GameScene extends Phaser.Scene {
   }
 
   _showResult(won, amount) {
+    if (this.resultShown) return;
+    this.resultShown = true;
     this.hud.showResult(won, amount, this.mult, this.bet);
     this.time.delayedCall(500, () => {
-      this.input.once('pointerdown', () => this.scene.start('Lobby', { balance: novoSaldo }));
+      this.input.once('pointerdown', () => this.scene.start('Lobby', { balance: state.balance }));
     });
   }
 
@@ -199,11 +236,6 @@ export default class GameScene extends Phaser.Scene {
     const dt = delta / 1000;
 
     this.speed = 170 + (this.mult - 1) * 58;
-
-    if (this.crashPoint && this.mult >= this.crashPoint) {
-      this._die();
-      return;
-    }
 
     this._drawBg(-this.mult - 1);
 
@@ -258,7 +290,7 @@ export default class GameScene extends Phaser.Scene {
 
     this.hud.updateMult(this.mult, this.bet);
 
-    if (this.mult > 2.5 && this._TObs.delay > 1400) this._tObs.delay = 1400;
+    if (this.mult > 2.5 && this._tObs.delay > 1400) this._tObs.delay = 1400;
     if (this.mult > 4.0 && this._tObs.delay > 1100) this._tObs.delay = 1100;
   }
 
