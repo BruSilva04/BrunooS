@@ -36,7 +36,7 @@ const MOCK = {
 };
 
 // ─────────────────────────────────────────────────────
-export class LobbyScene extends Phaser.Scene {
+export default class LobbyScene extends Phaser.Scene {
   constructor() { super({ key: 'Lobby' }); }
 
   // ── init: recebe saldo/stats do backend via data ───
