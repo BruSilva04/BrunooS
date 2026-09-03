@@ -3,9 +3,10 @@ import asyncio
 import time
 import uuid
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from services.auth import verify_session_token
 from services.casino import generate_crash_point, calculate_payout
 from services.provably_fair import generate_server_seed, hash_seed
-from db.database import save_round, update_round
+from db.database import adjust_user_balance, get_user_by_id, save_round, update_round
 
 router = APIRouter()
 
@@ -60,6 +61,22 @@ async def game_websocket(websocket: WebSocket):
                     })
                     continue
 
+                session = verify_session_token(msg.get("token"))
+                if not session:
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "Sessao invalida"
+                    })
+                    continue
+
+                user = await get_user_by_id(session["sub"])
+                if not user:
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "Usuario nao encontrado"
+                    })
+                    continue
+
                 try:
                     bet = float(msg.get("bet", 5))
                 except (TypeError, ValueError):
@@ -76,6 +93,14 @@ async def game_websocket(websocket: WebSocket):
                     })
                     continue
 
+                charged, balance = await adjust_user_balance(user["id"], -bet)
+                if not charged:
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "Saldo insuficiente"
+                    })
+                    continue
+
                 round_id = str(uuid.uuid4())
                 server_seed = generate_server_seed()
                 seed_hash = hash_seed(server_seed)
@@ -83,6 +108,7 @@ async def game_websocket(websocket: WebSocket):
                 
                 active_round = {
                     "round_id": round_id,
+                    "user_id": user["id"],
                     "bet": bet,
                     "server_seed": server_seed,
                     "server_seed_hash": seed_hash,
@@ -94,6 +120,7 @@ async def game_websocket(websocket: WebSocket):
                 # Save to DB
                 await save_round({
                     "round_id": round_id,
+                    "user_id": user["id"],
                     "bet": bet,
                     "crash_point": crash_point,
                     "server_seed": server_seed,
@@ -103,7 +130,8 @@ async def game_websocket(websocket: WebSocket):
                 await websocket.send_json({
                     "type": "round_started",
                     "round_id": round_id,
-                    "server_seed_hash": seed_hash
+                    "server_seed_hash": seed_hash,
+                    "balance": balance
                 })
 
                 if crash_task:
@@ -124,6 +152,7 @@ async def game_websocket(websocket: WebSocket):
                 
                 if success:
                     active_round["status"] = "won"
+                    _, balance = await adjust_user_balance(active_round["user_id"], payout)
                     await update_round(active_round["round_id"],
                         cash_out_at=server_mult, payout=payout, status="won")
                     
@@ -131,6 +160,7 @@ async def game_websocket(websocket: WebSocket):
                         "type": "cash_out_result",
                         "success": True,
                         "payout": payout,
+                        "balance": balance,
                         "multiplier": server_mult,
                         "client_multiplier": client_mult,
                         "crash_point": crash_point,

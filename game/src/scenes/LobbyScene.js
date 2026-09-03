@@ -1,395 +1,466 @@
-// game/src/scenes/LobbyScene.js
-// ─────────────────────────────────────────────────────
-//  Drop em: game/src/scenes/LobbyScene.js
-//  Depois registrar em main.js (ver main_patch.js)
-// ─────────────────────────────────────────────────────
-import { W, H } from '../config.js';
+import Phaser from 'phaser';
+import { W, H, state } from '../config.js';
+import { clearSession, fetchLobby, getStoredUser } from '../services/api.js';
 
-// ── PALETA ───────────────────────────────────────────
 const CLR = {
-  bg:       0x000510,
-  navy:     0x000e30,
-  card:     0x000d28,
-  border:   0x0d1f44,
-  gold:     '#FFD700',
-  green:    '#00ffaa',
-  blue:     '#3399ff',
-  muted:    '#334455',
-  danger:   '#ff5555',
-  textWeak: '#4d6680',
+  deep: 0x080711,
+  red: 0x9f1426,
+  redDark: 0x4a0612,
+  gold: 0xf4c84a,
+  goldLight: 0xffe58d,
+  jade: 0x21d6a2,
+  cyan: 0x37d9ff,
+  panel: 0x17111d,
+  line: 0x70421e,
+  muted: '#b98d78',
+  white: '#fff7dc',
+  danger: '#ff6b7b',
 };
 
-// ── DADOS MOCK (substituir por chamada à API) ─────────
-const MOCK = {
-  username:  'Bruno',
-  balance:   250.00,
-  stats: {
-    rounds:  47,
-    maxMult: 8.23,
-    winRate: 61,      // %
-  },
-  history: [
-    { mult: 6.82, won: true,  bet: 5,  payout: 34.10 },
-    { mult: 1.00, won: false, bet: 10, payout: -10.00 },
-    { mult: 3.45, won: true,  bet: 5,  payout: 17.25 },
-  ],
-};
-
-// ─────────────────────────────────────────────────────
 export default class LobbyScene extends Phaser.Scene {
-  constructor() { super({ key: 'Lobby' }); }
+  constructor() {
+    super({ key: 'Lobby' });
+  }
 
-  // ── init: recebe saldo/stats do backend via data ───
   init(data = {}) {
-    this.data_  = { ...MOCK, ...data };
-    this._subs  = [];  // tweens/timers para destruir no shutdown
+    this.fallbackBalance = data.balance;
+    this.user = getStoredUser();
+    this.snapshot = null;
+    this._subs = [];
   }
 
-  // ── create ────────────────────────────────────────
   create() {
-    this._drawOcean();
-    this._buildHeader();
-    this._buildBalanceCard();
-    this._buildStatRow();
-    this._buildHistory();
-    this._buildPlayBtn();
-    this._buildFooter();
-    this._floatBubbles();
+    this._drawLoading();
+    this._loadLobby();
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this._cleanup());
   }
 
-  // ── OCEAN BACKGROUND ─────────────────────────────
-  _drawOcean() {
-    const g = this.add.graphics();
+  async _loadLobby() {
+    try {
+      this.snapshot = await fetchLobby();
+      this.user = this.snapshot.user;
+      state.balance = Number(this.snapshot.balance || 0);
+      state.history = (this.snapshot.history || []).map((round) => Number(round.mult || 1)).slice(0, 5);
+      this._render();
+    } catch {
+      clearSession();
+      this.scene.start('Auth');
+    }
+  }
 
-    // Gradiente: superfície clara → fundo mais fundo
-    g.fillGradientStyle(0x001040, 0x001040, 0x000510, 0x000510, 1);
+  _drawLoading() {
+    this._drawBackground();
+    this.add.text(W / 2, H / 2, 'Carregando lobby...', {
+      fontSize: '18px',
+      fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#ffdf72',
+    }).setOrigin(0.5);
+  }
+
+  _render() {
+    this.children.removeAll(true);
+    this._drawBackground();
+    this._drawTopBar();
+    this._drawWallet();
+    this._drawPromoStrip();
+    this._drawCategories();
+    this._drawGameCard();
+    this._drawStats();
+    this._drawHistory();
+    this._drawBottomNav();
+    this._floatGold();
+  }
+
+  _drawBackground() {
+    const g = this.add.graphics();
+    g.fillGradientStyle(CLR.redDark, CLR.redDark, CLR.deep, CLR.deep, 1);
     g.fillRect(0, 0, W, H);
 
-    // Raios de luz — superficiais, calmos (lobby = luz, não perigo)
-    for (let i = 0; i < 5; i++) {
-      g.fillStyle(0x2255cc, 0.022);
-      const rx = 30 + i * 72;
-      g.fillTriangle(rx - 14, 0, rx + 14, 0, rx + 22, H * 0.55);
+    g.fillStyle(0x000000, 0.28);
+    for (let y = 0; y < H; y += 46) {
+      g.fillRect(0, y, W, 1);
     }
 
-    // Linha do horizonte subaquático (sutil)
-    g.lineStyle(1, 0x0a2040, 0.5);
-    g.lineBetween(0, H * 0.52, W, H * 0.52);
+    for (let i = 0; i < 10; i++) {
+      const x = -30 + i * 52;
+      g.fillStyle(i % 2 ? CLR.gold : CLR.red, 0.10);
+      g.fillTriangle(x, 0, x + 34, 0, x + 6, 260);
+    }
+
+    g.lineStyle(2, CLR.gold, 0.25);
+    g.strokeCircle(W + 8, 42, 86);
+    g.strokeCircle(-16, H - 26, 116);
   }
 
-  // ── HEADER BAR ───────────────────────────────────
-  _buildHeader() {
-    // Barra sólida
-    const bar = this.add.graphics();
-    bar.fillStyle(0x000820, 0.94);
-    bar.fillRect(0, 0, W, 52);
-    bar.lineStyle(1, 0x0d1f44);
-    bar.lineBetween(0, 52, W, 52);
-
-    // Logo: emoji + nome, centrados
-    this.add.text(W / 2, 26, '🧜‍♀️  Sereia do Tesouro', {
-      fontSize: '14px',
-      fontFamily: '"Arial Black", sans-serif',
-      color: CLR.gold,
-      letterSpacing: 0.5,
+  _drawTopBar() {
+    const y = 14;
+    this._pill(14, y, 38, 38, CLR.red, CLR.gold, 0.95);
+    this.add.text(33, y + 19, 'S', {
+      fontSize: '22px',
+      fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#ffeb9a',
     }).setOrigin(0.5);
 
-    // Avatar à esquerda (placeholder — substituir por foto)
-    const av = this.add.circle(26, 26, 15, 0x001234);
-    this.add.text(26, 26, '👤', { fontSize: '15px' }).setOrigin(0.5);
-
-    // Notificação à direita
-    const bell = this.add.text(W - 18, 26, '🔔', {
-      fontSize: '16px',
-    }).setOrigin(0.5).setInteractive({ useHandCursor: true });
-
-    bell.on('pointerdown', () => this._toast('Nenhuma notificação nova'));
-  }
-
-  // ── BALANCE CARD (herói) ──────────────────────────
-  _buildBalanceCard() {
-    const CX = W / 2, CY = 100, CW = W - 32, CH = 104;
-    const PX = CX - CW / 2;
-
-    // Cartão base
-    const card = this.add.graphics();
-    card.fillStyle(CLR.navy, 0.97);
-    card.fillRoundedRect(PX, CY, CW, CH, 14);
-    card.lineStyle(1, CLR.border);
-    card.strokeRoundedRect(PX, CY, CW, CH, 14);
-
-    // Brilho bioluminescente — o único pulso da tela
-    const glow = this.add.graphics();
-    glow.fillStyle(0x00ffaa, 0.035);
-    glow.fillRoundedRect(PX, CY, CW, CH, 14);
-    this._subs.push(
-      this.tweens.add({ targets: glow, alpha: 0, duration: 1800, yoyo: true, repeat: -1, ease: 'Sine.easeInOut' })
-    );
-
-    // Label saldo
-    this.add.text(PX + 18, CY + 14, 'Saldo disponível', {
-      fontSize: '11px', color: CLR.textWeak, fontStyle: 'italic',
+    this.add.text(62, y + 2, 'SEREIA PALACE', {
+      fontSize: '18px',
+      fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#ffdf72',
+    });
+    this.add.text(63, y + 24, `${this.user?.username || 'jogadora'} · ${this.user?.role || 'player'}`, {
+      fontSize: '10px',
+      color: CLR.muted,
     });
 
-    // Número do saldo — é o herói, grande e real
-    this.add.text(PX + 18, CY + 34, `R$ ${this.data_.balance.toFixed(2)}`, {
-      fontSize: '38px',
-      fontFamily: '"Arial Black", sans-serif',
-      color: CLR.green,
+    this._iconButton(W - 92, y + 2, '⟳', () => this._loadLobby());
+    this._iconButton(W - 48, y + 2, '⎋', () => {
+      clearSession();
+      this.scene.start('Auth');
     });
-
-    // Botão Depositar
-    const dep = this.add.text(PX + CW - 14, CY + 28, '+ Depositar', {
-      fontSize: '12px',
-      fontFamily: '"Arial Black", sans-serif',
-      color: '#ffffff',
-      backgroundColor: '#003322',
-      padding: { x: 10, y: 7 },
-    }).setOrigin(1, 0.5).setInteractive({ useHandCursor: true });
-
-    dep.on('pointerover', () => dep.setStyle({ backgroundColor: '#004d33' }));
-    dep.on('pointerout',  () => dep.setStyle({ backgroundColor: '#003322' }));
-    dep.on('pointerdown', () => this._openModal('deposit'));
-
-    // Botão Sacar Pix
-    const saq = this.add.text(PX + CW - 14, CY + 72, '↑ Sacar via Pix', {
-      fontSize: '11px', color: CLR.blue,
-      backgroundColor: '#001133',
-      padding: { x: 8, y: 5 },
-    }).setOrigin(1, 0.5).setInteractive({ useHandCursor: true });
-
-    saq.on('pointerdown', () => this._openModal('withdraw'));
   }
 
-  // ── FAIXA DE STATS ───────────────────────────────
-  _buildStatRow() {
-    const SY = 218;
-    const stats = [
-      { value: `${this.data_.stats.rounds}`,    label: 'partidas',   icon: '🎮' },
-      { value: `${this.data_.stats.maxMult}×`,  label: 'maior mult', icon: '🚀' },
-      { value: `${this.data_.stats.winRate}%`,  label: 'vitórias',   icon: '💎' },
+  _drawWallet() {
+    const x = 14;
+    const y = 68;
+    const w = W - 28;
+    const h = 96;
+    const g = this.add.graphics();
+    g.fillGradientStyle(0x2d1014, 0x2d1014, 0x0e0b12, 0x0e0b12, 1);
+    g.fillRoundedRect(x, y, w, h, 10);
+    g.lineStyle(1, CLR.gold, 0.50);
+    g.strokeRoundedRect(x, y, w, h, 10);
+
+    g.fillStyle(CLR.gold, 0.18);
+    g.fillCircle(x + w - 36, y + 28, 54);
+
+    this.add.text(x + 16, y + 13, 'SALDO DISPONIVEL', {
+      fontSize: '10px',
+      fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#eebc6b',
+    });
+    this.add.text(x + 16, y + 32, `R$ ${state.balance.toFixed(2)}`, {
+      fontSize: '34px',
+      fontFamily: '"Arial Black", Arial, sans-serif',
+      color: CLR.white,
+    });
+
+    this._smallButton(x + 18, y + 70, 102, 28, '+ Depositar', 0xd59d19, 0x6d120e, () => this._openModal('deposit'));
+    this._smallButton(x + 130, y + 70, 96, 28, 'Sacar Pix', 0x17233a, 0x385a90, () => this._openModal('withdraw'));
+  }
+
+  _drawPromoStrip() {
+    const y = 176;
+    const g = this.add.graphics();
+    g.fillGradientStyle(0xcf2038, 0xcf2038, 0x7c1021, 0x7c1021, 1);
+    g.fillRoundedRect(14, y, W - 28, 68, 10);
+    g.lineStyle(1, CLR.goldLight, 0.56);
+    g.strokeRoundedRect(14, y, W - 28, 68, 10);
+
+    this.add.text(30, y + 11, 'EXCLUSIVO', {
+      fontSize: '10px',
+      fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#350006',
+      backgroundColor: '#ffdf72',
+      padding: { x: 8, y: 3 },
+    });
+    this.add.text(30, y + 34, 'Mergulho Premiado', {
+      fontSize: '20px',
+      fontFamily: '"Arial Black", Arial, sans-serif',
+      color: CLR.white,
+    });
+    this.add.text(W - 24, y + 18, '95%\nRTP', {
+      fontSize: '18px',
+      fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#ffdf72',
+      align: 'right',
+    }).setOrigin(1, 0);
+  }
+
+  _drawCategories() {
+    const labels = ['Hot', 'Slots', 'Crash', 'VIP'];
+    labels.forEach((label, index) => {
+      const x = 14 + index * 92;
+      const active = index === 0;
+      const bg = active ? CLR.gold : 0x211521;
+      const border = active ? CLR.goldLight : CLR.line;
+      this._pill(x, 256, 82, 32, bg, border, active ? 1 : 0.86);
+      this.add.text(x + 41, 272, label, {
+        fontSize: '12px',
+        fontFamily: '"Arial Black", Arial, sans-serif',
+        color: active ? '#330009' : '#ffdca0',
+      }).setOrigin(0.5);
+    });
+  }
+
+  _drawGameCard() {
+    const x = 14;
+    const y = 302;
+    const w = W - 28;
+    const h = 156;
+    const g = this.add.graphics();
+    g.fillGradientStyle(0x201019, 0x201019, 0x080c18, 0x080c18, 1);
+    g.fillRoundedRect(x, y, w, h, 12);
+    g.lineStyle(2, CLR.gold, 0.72);
+    g.strokeRoundedRect(x, y, w, h, 12);
+
+    g.fillGradientStyle(0x113251, 0x113251, 0x041120, 0x041120, 1);
+    g.fillRoundedRect(x + 12, y + 14, 132, 128, 10);
+    g.lineStyle(1, CLR.cyan, 0.28);
+    g.strokeRoundedRect(x + 12, y + 14, 132, 128, 10);
+
+    g.fillStyle(0x37d9ff, 0.12);
+    g.fillCircle(x + 80, y + 66, 54);
+    g.fillStyle(CLR.gold, 0.16);
+    g.fillCircle(x + 112, y + 40, 22);
+    this.add.text(x + 78, y + 62, '🧜‍♀️', { fontSize: '52px' }).setOrigin(0.5);
+    this.add.text(x + 118, y + 106, '💎', { fontSize: '25px' }).setOrigin(0.5);
+
+    this.add.text(x + 160, y + 18, 'Sereia do Tesouro', {
+      fontSize: '21px',
+      fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#ffdf72',
+    });
+    this.add.text(x + 160, y + 48, 'Runner crash · Cash Out', {
+      fontSize: '11px',
+      color: '#e3a992',
+    });
+
+    this._badge(x + 160, y + 75, 'AO VIVO', 0x123d2d, '#80ffd7');
+    this._badge(x + 232, y + 75, 'UNICO JOGO', 0x3f1420, '#ffdca0');
+
+    this._playButton(x + 160, y + 108, w - 174, 38);
+  }
+
+  _drawStats() {
+    const stats = this.snapshot?.stats || { rounds: 0, maxMult: 1, winRate: 0 };
+    const items = [
+      { label: 'Rodadas', value: String(stats.rounds || 0) },
+      { label: 'Maior mult', value: `${Number(stats.maxMult || 1).toFixed(2)}x` },
+      { label: 'Vitorias', value: `${stats.winRate || 0}%` },
     ];
 
-    const gap = 8, n = stats.length;
-    const cw  = (W - 32 - gap * (n - 1)) / n;
-
-    stats.forEach((s, i) => {
-      const cx = 16 + i * (cw + gap);
-
-      const card = this.add.graphics();
-      card.fillStyle(CLR.card, 0.9);
-      card.fillRoundedRect(cx, SY, cw, 72, 10);
-      card.lineStyle(1, CLR.border);
-      card.strokeRoundedRect(cx, SY, cw, 72, 10);
-
-      // Icon
-      this.add.text(cx + cw / 2, SY + 16, s.icon, { fontSize: '16px' }).setOrigin(0.5);
-
-      // Valor
-      this.add.text(cx + cw / 2, SY + 38, s.value, {
-        fontSize: '16px',
-        fontFamily: '"Arial Black", sans-serif',
-        color: '#ffffff',
-      }).setOrigin(0.5);
-
-      // Label
-      this.add.text(cx + cw / 2, SY + 58, s.label, {
-        fontSize: '9px', color: CLR.textWeak,
-      }).setOrigin(0.5);
+    items.forEach((item, index) => {
+      const x = 14 + index * 122;
+      const g = this.add.graphics();
+      g.fillStyle(CLR.panel, 0.92);
+      g.fillRoundedRect(x, 472, 112, 58, 8);
+      g.lineStyle(1, CLR.line, 0.7);
+      g.strokeRoundedRect(x, 472, 112, 58, 8);
+      this.add.text(x + 12, 483, item.label, {
+        fontSize: '9px',
+        color: CLR.muted,
+      });
+      this.add.text(x + 12, 500, item.value, {
+        fontSize: '18px',
+        fontFamily: '"Arial Black", Arial, sans-serif',
+        color: CLR.white,
+      });
     });
   }
 
-  // ── HISTÓRICO DE RODADAS ──────────────────────────
-  _buildHistory() {
-    const HY = 308;
-
-    this.add.text(16, HY, 'Últimas rodadas', {
-      fontSize: '11px', color: CLR.textWeak, fontStyle: 'italic',
+  _drawHistory() {
+    const y = 548;
+    const history = this.snapshot?.history || [];
+    this.add.text(16, y, 'ULTIMAS RODADAS', {
+      fontSize: '10px',
+      fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#eebc6b',
     });
 
-    const ROW_H = 50, GAP = 6;
-
-    this.data_.history.forEach((r, i) => {
-      const ry = HY + 20 + i * (ROW_H + GAP);
-      const won = r.won;
-
-      // Fundo do row
-      const row = this.add.graphics();
-      row.fillStyle(CLR.card, 0.85);
-      row.fillRoundedRect(16, ry, W - 32, ROW_H, 9);
-      row.lineStyle(1, won ? 0x004422 : 0x330000);
-      row.strokeRoundedRect(16, ry, W - 32, ROW_H, 9);
-
-      // Ícone de status
-      this.add.text(40, ry + ROW_H / 2, won ? '💎' : '🦈', {
-        fontSize: '18px',
+    if (!history.length) {
+      this.add.text(W / 2, y + 38, 'Sem rodadas ainda', {
+        fontSize: '12px',
+        color: CLR.muted,
       }).setOrigin(0.5);
+      return;
+    }
 
-      // Multiplicador
-      this.add.text(66, ry + 14, `${r.mult.toFixed(2)}×`, {
-        fontSize: '17px',
-        fontFamily: '"Arial Black", sans-serif',
-        color: won ? CLR.green : CLR.danger,
-      });
-      this.add.text(66, ry + 33, won ? 'Cash Out' : 'Capturada', {
-        fontSize: '10px',
-        color: won ? '#336655' : '#664444',
-      });
-
-      // Aposta
-      this.add.text(W / 2, ry + ROW_H / 2, `aposta R$ ${r.bet.toFixed(2)}`, {
-        fontSize: '10px', color: CLR.textWeak,
-      }).setOrigin(0.5);
-
-      // Resultado
-      const resultStr = won
-        ? `+R$ ${r.payout.toFixed(2)}`
-        : `-R$ ${Math.abs(r.payout).toFixed(2)}`;
-
-      this.add.text(W - 22, ry + ROW_H / 2, resultStr, {
-        fontSize: '15px',
-        fontFamily: '"Arial Black", sans-serif',
-        color: won ? CLR.green : CLR.danger,
+    history.slice(0, 3).forEach((round, index) => {
+      const rowY = y + 18 + index * 28;
+      const won = !!round.won;
+      const g = this.add.graphics();
+      g.fillStyle(won ? 0x0d2b24 : 0x301018, 0.94);
+      g.fillRoundedRect(14, rowY, W - 28, 24, 6);
+      this.add.text(26, rowY + 12, won ? 'WIN' : 'LOSS', {
+        fontSize: '9px',
+        fontFamily: '"Arial Black", Arial, sans-serif',
+        color: won ? '#80ffd7' : CLR.danger,
+      }).setOrigin(0, 0.5);
+      this.add.text(86, rowY + 12, `${Number(round.mult || 1).toFixed(2)}x`, {
+        fontSize: '12px',
+        fontFamily: '"Arial Black", Arial, sans-serif',
+        color: CLR.white,
+      }).setOrigin(0, 0.5);
+      this.add.text(W - 22, rowY + 12, `${won ? '+' : ''}R$ ${Number(round.payout || 0).toFixed(2)}`, {
+        fontSize: '12px',
+        fontFamily: '"Arial Black", Arial, sans-serif',
+        color: won ? '#80ffd7' : CLR.danger,
       }).setOrigin(1, 0.5);
     });
   }
 
-  // ── BOTÃO PRINCIPAL ───────────────────────────────
-  _buildPlayBtn() {
-    const BY = H - 76;
+  _drawBottomNav() {
+    const g = this.add.graphics();
+    g.fillStyle(0x090710, 0.97);
+    g.fillRect(0, H - 54, W, 54);
+    g.lineStyle(1, CLR.gold, 0.30);
+    g.lineBetween(0, H - 54, W, H - 54);
 
-    const btn = this.add.text(W / 2, BY, '  🌊  Mergulhar agora  ', {
-      fontSize: '18px',
-      fontFamily: '"Arial Black", sans-serif',
-      color: '#ffffff',
-      backgroundColor: '#004db3',
-      padding: { x: 30, y: 15 },
-    }).setOrigin(0.5).setInteractive({ useHandCursor: true });
-
-    // Apenas o botão pulsa — uma animação, deliberada
-    this._subs.push(
-      this.tweens.add({
-        targets: btn,
-        scaleX: 1.02, scaleY: 1.02,
-        duration: 950, yoyo: true, repeat: -1, ease: 'Sine.easeInOut',
-      })
-    );
-
-    btn.on('pointerover', () => {
-      btn.setStyle({ backgroundColor: '#0066ff' });
-      this.tweens.getTweensOf(btn).forEach(t => t.pause());
-      btn.setScale(1.04);
-    });
-    btn.on('pointerout', () => {
-      btn.setStyle({ backgroundColor: '#004db3' });
-      this.tweens.getTweensOf(btn).forEach(t => t.resume());
-    });
-    btn.on('pointerdown', () => {
-      // Passa saldo atual para o MenuScene se necessário
-      this.scene.start('Menu', { balance: this.data_.balance });
+    const nav = [
+      ['Lobby', 64],
+      ['Carteira', W / 2],
+      ['Perfil', W - 64],
+    ];
+    nav.forEach(([label, x], index) => {
+      this.add.text(x, H - 32, index === 0 ? '◆' : '◇', {
+        fontSize: '13px',
+        color: index === 0 ? '#ffdf72' : '#85625f',
+      }).setOrigin(0.5);
+      this.add.text(x, H - 14, label, {
+        fontSize: '9px',
+        color: index === 0 ? '#ffdf72' : '#85625f',
+      }).setOrigin(0.5);
     });
   }
 
-  // ── FOOTER ────────────────────────────────────────
-  _buildFooter() {
-    this.add.text(W / 2, H - 12, '18+  •  Jogue com responsabilidade', {
-      fontSize: '9px', color: '#1a2233',
+  _playButton(x, y, w, h) {
+    const g = this.add.graphics();
+    g.fillGradientStyle(CLR.goldLight, CLR.goldLight, 0xd89819, 0xd89819, 1);
+    g.fillRoundedRect(x, y, w, h, 8);
+    g.lineStyle(1, 0xffffff, 0.35);
+    g.strokeRoundedRect(x, y, w, h, 8);
+    this.add.text(x + w / 2, y + h / 2, 'JOGAR AGORA', {
+      fontSize: '14px',
+      fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#330009',
+    }).setOrigin(0.5);
+    this.add.zone(x + w / 2, y + h / 2, w, h)
+      .setInteractive({ useHandCursor: true })
+      .on('pointerdown', () => this.scene.start('Menu', { balance: state.balance }));
+  }
+
+  _smallButton(x, y, w, h, label, topColor, bottomColor, callback) {
+    const g = this.add.graphics();
+    g.fillGradientStyle(topColor, topColor, bottomColor, bottomColor, 1);
+    g.fillRoundedRect(x, y, w, h, 7);
+    g.lineStyle(1, 0xffffff, 0.18);
+    g.strokeRoundedRect(x, y, w, h, 7);
+    this.add.text(x + w / 2, y + h / 2, label, {
+      fontSize: '11px',
+      fontFamily: '"Arial Black", Arial, sans-serif',
+      color: CLR.white,
+    }).setOrigin(0.5);
+    this.add.zone(x + w / 2, y + h / 2, w, h)
+      .setInteractive({ useHandCursor: true })
+      .on('pointerdown', callback);
+  }
+
+  _iconButton(x, y, label, callback) {
+    this._pill(x, y, 36, 34, 0x1d1320, CLR.line, 0.9);
+    this.add.text(x + 18, y + 17, label, {
+      fontSize: '17px',
+      color: '#ffdf72',
+    }).setOrigin(0.5);
+    this.add.zone(x + 18, y + 17, 36, 34)
+      .setInteractive({ useHandCursor: true })
+      .on('pointerdown', callback);
+  }
+
+  _pill(x, y, w, h, fill, stroke, alpha = 1) {
+    const g = this.add.graphics();
+    g.fillStyle(fill, alpha);
+    g.fillRoundedRect(x, y, w, h, h / 2);
+    g.lineStyle(1, stroke, 0.45);
+    g.strokeRoundedRect(x, y, w, h, h / 2);
+  }
+
+  _badge(x, y, label, fill, color) {
+    const width = label.length * 7 + 20;
+    const g = this.add.graphics();
+    g.fillStyle(fill, 0.96);
+    g.fillRoundedRect(x, y, width, 22, 6);
+    this.add.text(x + width / 2, y + 11, label, {
+      fontSize: '9px',
+      fontFamily: '"Arial Black", Arial, sans-serif',
+      color,
     }).setOrigin(0.5);
   }
 
-  // ── BOLHAS FLUTUANTES ────────────────────────────
-  _floatBubbles() {
-    const bubbles = Array.from({ length: 9 }, () => {
-      const b = this.add.circle(
-        Phaser.Math.Between(0, W),
-        Phaser.Math.Between(0, H),
-        Phaser.Math.Between(2, 7),
-        0x3366ff, 0.12
-      );
-      return { obj: b, vy: Phaser.Math.Between(22, 65) };
-    });
-
-    this._subs.push(
-      this.time.addEvent({
-        delay: 16, loop: true, callback: () => {
-          bubbles.forEach(b => {
-            b.obj.y -= b.vy * 0.016;
-            if (b.obj.y < -10) {
-              b.obj.x = Phaser.Math.Between(0, W);
-              b.obj.y = H + 8;
-            }
-          });
-        },
-      })
-    );
-  }
-
-  // ── MODAL (Depositar / Sacar) ─────────────────────
   _openModal(type) {
     const isDeposit = type === 'deposit';
-    const title = isDeposit ? '💳 Depositar via Pix' : '↑ Sacar via Pix';
-    const desc  = isDeposit
-      ? 'Gere uma chave Pix\ne deposite instantaneamente.'
-      : 'Solicite o saque.\nProcessado em até 24h.';
+    const overlay = this.add.rectangle(0, 0, W, H, 0x000000, 0.72).setOrigin(0).setInteractive();
+    const x = 34;
+    const y = 222;
+    const w = W - 68;
+    const h = 210;
+    const g = this.add.graphics();
+    g.fillStyle(0x190d16, 0.98);
+    g.fillRoundedRect(x, y, w, h, 12);
+    g.lineStyle(2, CLR.gold, 0.58);
+    g.strokeRoundedRect(x, y, w, h, 12);
 
-    // Overlay
-    const ov = this.add.graphics();
-    ov.fillStyle(0x000000, 0.72);
-    ov.fillRect(0, 0, W, H);
-    ov.setInteractive();  // bloqueia cliques atrás
-
-    // Cartão do modal
-    const MW = 320, MH = 220;
-    const MX = W / 2 - MW / 2, MY = H / 2 - MH / 2;
-
-    const modal = this.add.graphics();
-    modal.fillStyle(0x000e30, 0.98);
-    modal.fillRoundedRect(MX, MY, MW, MH, 16);
-    modal.lineStyle(1, 0x1a3d7a);
-    modal.strokeRoundedRect(MX, MY, MW, MH, 16);
-
-    const tTitle = this.add.text(W / 2, MY + 30, title, {
-      fontSize: '16px', fontFamily: '"Arial Black", sans-serif', color: CLR.gold,
+    const title = this.add.text(W / 2, y + 34, isDeposit ? 'Depositar via Pix' : 'Sacar via Pix', {
+      fontSize: '18px',
+      fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#ffdf72',
+    }).setOrigin(0.5);
+    const desc = this.add.text(W / 2, y + 94, isDeposit
+      ? 'Integracao Pix entra na proxima etapa.'
+      : 'Saque Pix sera liberado apos wallet real.', {
+      fontSize: '13px',
+      color: '#ffc4aa',
+      align: 'center',
+      wordWrap: { width: w - 42 },
+    }).setOrigin(0.5);
+    const status = this.add.text(W / 2, y + 136, 'EM DESENVOLVIMENTO', {
+      fontSize: '11px',
+      fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#8d6c61',
     }).setOrigin(0.5);
 
-    const tDesc = this.add.text(W / 2, MY + 90, desc, {
-      fontSize: '13px', color: '#8899aa', align: 'center',
+    const closeText = this.add.text(W / 2, y + h - 34, 'FECHAR', {
+      fontSize: '13px',
+      fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#330009',
+      backgroundColor: '#ffdf72',
+      padding: { x: 28, y: 8 },
     }).setOrigin(0.5);
-
-    const tBadge = this.add.text(W / 2, MY + 148, '🚧  Em desenvolvimento', {
-      fontSize: '12px', color: CLR.textWeak,
-    }).setOrigin(0.5);
-
-    const btnClose = this.add.text(W / 2, MY + MH - 28, '  Fechar  ', {
-      fontSize: '13px', color: '#ffffff',
-      backgroundColor: '#112233',
-      padding: { x: 22, y: 9 },
-    }).setOrigin(0.5).setInteractive({ useHandCursor: true });
-
-    const destroy = () => [ov, modal, tTitle, tDesc, tBadge, btnClose].forEach(o => o.destroy());
-    btnClose.on('pointerdown', destroy);
-    ov.on('pointerdown', destroy);
+    const closeHit = this.add.zone(W / 2, y + h - 34, 118, 40).setInteractive({ useHandCursor: true });
+    const close = () => [overlay, g, title, desc, status, closeText, closeHit].forEach((item) => item.destroy());
+    closeHit.on('pointerdown', close);
+    overlay.on('pointerdown', close);
   }
 
-  // ── TOAST LEVE ───────────────────────────────────
-  _toast(msg) {
-    const t = this.add.text(W / 2, H - 100, msg, {
-      fontSize: '12px', color: '#ffffff',
-      backgroundColor: '#001133',
-      padding: { x: 14, y: 8 },
-    }).setOrigin(0.5).setAlpha(0);
-
-    this.tweens.add({
-      targets: t, alpha: 1, duration: 200, yoyo: true, hold: 1400,
-      onComplete: () => t.destroy(),
+  _floatGold() {
+    const dots = Array.from({ length: 16 }, () => {
+      const dot = this.add.circle(
+        Phaser.Math.Between(0, W),
+        Phaser.Math.Between(0, H),
+        Phaser.Math.Between(1, 3),
+        CLR.gold,
+        Phaser.Math.FloatBetween(0.10, 0.28),
+      );
+      return { dot, vy: Phaser.Math.Between(12, 34) };
     });
+
+    this._subs.push(this.time.addEvent({
+      delay: 33,
+      loop: true,
+      callback: () => {
+        dots.forEach((item) => {
+          item.dot.y -= item.vy * 0.033;
+          if (item.dot.y < -8) {
+            item.dot.x = Phaser.Math.Between(0, W);
+            item.dot.y = H + 8;
+          }
+        });
+      },
+    }));
   }
 
-  // ── CLEANUP ───────────────────────────────────────
-  shutdown() {
-    this._subs.forEach(s => {
-      if (s && s.stop) s.stop();
-      if (s && s.destroy) s.destroy();
+  _cleanup() {
+    this._subs.forEach((item) => {
+      if (item && item.destroy) item.destroy();
     });
+    this._subs = [];
   }
 }

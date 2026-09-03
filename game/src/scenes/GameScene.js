@@ -6,6 +6,7 @@ import Gem from '../objects/Gem.js';
 import HUD from '../objects/HUD.js';
 import SoundManager from '../utils/SoundManager.js';
 import ParticleEffects from '../objects/ParticleEffects.js';
+import { clearSession, getAuthToken } from '../services/api.js';
 
 export default class GameScene extends Phaser.Scene {
   constructor() { 
@@ -61,7 +62,7 @@ export default class GameScene extends Phaser.Scene {
     try {
       this.ws = new WebSocket(WS_URL);
       this.ws.onopen = () => {
-        this.ws.send(JSON.stringify({ action: 'start_round', bet: this.bet }));
+        this.ws.send(JSON.stringify({ action: 'start_round', bet: this.bet, token: getAuthToken() }));
       };
       this.ws.onmessage = (event) => {
         const data = JSON.parse(event.data);
@@ -162,10 +163,12 @@ export default class GameScene extends Phaser.Scene {
 
     if (this.ws && this.ws.readyState === WebSocket.OPEN && this.roundId) {
       this.ws.send(JSON.stringify({ action: 'cash_out', round_id: this.roundId, client_mult: this.mult }));
-    } else {
+    } else if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       state.balance += (won - this.bet);
       addHistory(this.mult);
       this._showResult(true, won);
+    } else {
+      this._handleServerError('Rodada nao autorizada');
     }
   }
 
@@ -195,6 +198,19 @@ export default class GameScene extends Phaser.Scene {
 
   _handleServerError(message) {
     console.warn('Game server error:', message);
+    if (!this.roundId && !this.resultShown) {
+      this.dead = true;
+      this.cashed = true;
+      this._stopTimers();
+      if (message && message.toLowerCase().includes('sessao')) {
+        clearSession();
+        this.scene.start('Auth');
+      } else {
+        this.scene.start('Lobby', { balance: state.balance });
+      }
+      return;
+    }
+
     if ((this.dead || this.cashed) && !this.resultShown) {
       this._applyLossResult(this.mult);
     }

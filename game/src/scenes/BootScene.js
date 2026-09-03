@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { W, H } from '../config.js';
+import { getAuthToken } from '../services/api.js';
 
 export default class BootScene extends Phaser.Scene {
   constructor() {
@@ -13,7 +14,7 @@ export default class BootScene extends Phaser.Scene {
     }).setOrigin(0.5);
 
     this.time.delayedCall(500, () => {
-      this.scene.start('Lobby');
+      this.scene.start(getAuthToken() ? 'Lobby' : 'Auth');
     });
   }
 }
