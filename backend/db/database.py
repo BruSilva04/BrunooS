@@ -60,7 +60,7 @@ async def init_db():
 async def ensure_admin_user():
     username = os.getenv("ADMIN_USERNAME", "admin")
     password = os.getenv("ADMIN_PASSWORD", "@dm1n_")
-    payload = {
+    create_payload = {
         "username": username,
         "email": os.getenv("ADMIN_EMAIL", "admin@sereiadotesouro.local"),
         "phone": os.getenv("ADMIN_PHONE", "+5500000000000"),
@@ -68,6 +68,11 @@ async def ensure_admin_user():
         "role": "admin",
         "permissions": {"admin": True, "play": True, "wallet": True, "users": True},
         "balance": 100000.0,
+    }
+    update_payload = {
+        key: value
+        for key, value in create_payload.items()
+        if key not in {"balance"}
     }
 
     existing = await get_user_by_username(username)
@@ -77,11 +82,11 @@ async def ensure_admin_user():
         if existing:
             return (
                 client.table(USERS_TABLE)
-                .update(payload)
+                .update(update_payload)
                 .eq("id", existing["id"])
                 .execute()
             )
-        return client.table(USERS_TABLE).insert(payload).execute()
+        return client.table(USERS_TABLE).insert(create_payload).execute()
 
     await anyio.to_thread.run_sync(upsert_admin)
 

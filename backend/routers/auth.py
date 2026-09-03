@@ -46,10 +46,16 @@ def public_user(user: dict) -> dict:
     }
 
 
-def db_unavailable() -> HTTPException:
+def db_unavailable(exc: Exception) -> HTTPException:
+    error_text = str(exc)
+    if "public.users" in error_text or "PGRST205" in error_text:
+        detail = "Tabela public.users nao existe no Supabase. Aplique backend/db/schema.sql no SQL Editor."
+    else:
+        detail = "Banco Supabase indisponivel. Verifique SUPABASE_URL, SUPABASE_SECRET_KEY e permissoes do projeto."
+
     return HTTPException(
         status_code=503,
-        detail="Banco Supabase indisponivel. Verifique as variaveis SUPABASE_URL e SUPABASE_SECRET_KEY.",
+        detail=detail,
     )
 
 
@@ -76,7 +82,7 @@ async def register(payload: RegisterRequest):
     except HTTPException:
         raise
     except Exception as exc:
-        raise db_unavailable() from exc
+        raise db_unavailable(exc) from exc
 
     return {"token": create_session_token(user), "user": public_user(user)}
 
@@ -86,7 +92,7 @@ async def login(payload: LoginRequest):
     try:
         user = await get_user_by_username(payload.username.strip())
     except Exception as exc:
-        raise db_unavailable() from exc
+        raise db_unavailable(exc) from exc
 
     if not user or not verify_password(payload.password, user.get("password_hash", "")):
         raise HTTPException(status_code=401, detail="Usuario ou senha invalido")
@@ -103,7 +109,7 @@ async def me(authorization: str | None = Header(default=None)):
     try:
         user = await get_user_by_id(session["sub"])
     except Exception as exc:
-        raise db_unavailable() from exc
+        raise db_unavailable(exc) from exc
 
     if not user:
         raise HTTPException(status_code=401, detail="Usuario nao encontrado")
@@ -119,7 +125,7 @@ async def lobby_me(authorization: str | None = Header(default=None)):
     try:
         snapshot = await get_lobby_snapshot(session["sub"])
     except Exception as exc:
-        raise db_unavailable() from exc
+        raise db_unavailable(exc) from exc
 
     if not snapshot:
         raise HTTPException(status_code=401, detail="Usuario nao encontrado")
