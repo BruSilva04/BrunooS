@@ -7,7 +7,12 @@ export const OBS_DELAY_START = 2000;
 export const GEM_DELAY = 800;
 export const MULT_TICK = 0.012;
 export const GEM_BONUS = 0.07;
-export const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:8000/ws/game';
+
+const runtimeHost = window.location.hostname || 'localhost';
+const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+
+export const API_URL = import.meta.env.VITE_API_URL || `${window.location.protocol}//${runtimeHost}:8000`;
+export const WS_URL = import.meta.env.VITE_WS_URL || `${wsProtocol}://${runtimeHost}:8000/ws/game`;
 
 // Global Wallet & iGaming History State
 export const state = {

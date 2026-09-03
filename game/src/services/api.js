@@ -1,16 +1,7 @@
-import { WS_URL } from '../config.js';
+import { API_URL } from '../config.js';
 
 const TOKEN_KEY = 'sereia_auth_token';
 const USER_KEY = 'sereia_auth_user';
-
-function wsToHttp(url) {
-  return url
-    .replace(/^wss:/, 'https:')
-    .replace(/^ws:/, 'http:')
-    .replace(/\/ws\/game$/, '');
-}
-
-export const API_URL = import.meta.env.VITE_API_URL || wsToHttp(WS_URL);
 
 export function getAuthToken() {
   return localStorage.getItem(TOKEN_KEY);
@@ -44,10 +35,15 @@ async function request(path, options = {}) {
     headers.Authorization = `Bearer ${token}`;
   }
 
-  const response = await fetch(`${API_URL}${path}`, {
-    ...options,
-    headers,
-  });
+  let response;
+  try {
+    response = await fetch(`${API_URL}${path}`, {
+      ...options,
+      headers,
+    });
+  } catch (error) {
+    throw new Error(`Falha ao conectar com o backend em ${API_URL}`);
+  }
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     throw new Error(data.detail || data.message || 'Falha de comunicacao');
