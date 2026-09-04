@@ -1,10 +1,14 @@
 from contextlib import asynccontextmanager
 import os
 
+import anyio
 from fastapi import FastAPI
+from fastapi import HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from routers import auth
 from routers import game
+from db.database import USERS_TABLE
+from db.database import get_supabase_client
 from db.database import init_db
 
 @asynccontextmanager
@@ -40,3 +44,30 @@ app.include_router(auth.router)
 @app.get("/health")
 async def health():
     return {"status": "ok", "game": "Sereia do Tesouro"}
+
+
+@app.get("/health/db")
+async def health_db():
+    def check_supabase():
+        return (
+            get_supabase_client()
+            .table(USERS_TABLE)
+            .select("id")
+            .limit(1)
+            .execute()
+        )
+
+    try:
+        await anyio.to_thread.run_sync(check_supabase)
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Supabase nao configurado no Render. Cadastre SUPABASE_URL e SUPABASE_SECRET_KEY.",
+        ) from exc
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Supabase configurado, mas consulta falhou. Confira a chave service_role, RLS/permissoes e se backend/db/schema.sql foi aplicado.",
+        ) from exc
+
+    return {"status": "ok", "database": "supabase"}

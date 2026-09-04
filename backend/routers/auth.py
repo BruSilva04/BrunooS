@@ -48,7 +48,9 @@ def public_user(user: dict) -> dict:
 
 def db_unavailable(exc: Exception) -> HTTPException:
     error_text = str(exc)
-    if "public.users" in error_text or "PGRST205" in error_text:
+    if "Configure SUPABASE_URL" in error_text:
+        detail = "Supabase nao configurado no Render. Cadastre SUPABASE_URL e SUPABASE_SECRET_KEY nas Environment Variables do backend."
+    elif "public.users" in error_text or "PGRST205" in error_text:
         detail = "Tabela public.users nao existe no Supabase. Aplique backend/db/schema.sql no SQL Editor."
     else:
         detail = "Banco Supabase indisponivel. Verifique SUPABASE_URL, SUPABASE_SECRET_KEY e permissoes do projeto."
