@@ -18,7 +18,7 @@ const CLR = {
 };
 
 const FONT_BODY = 'Arial, Helvetica, sans-serif';
-const TEXT_RESOLUTION = 3;
+const TEXT_RESOLUTION = 4;
 
 export default class LobbyScene extends Phaser.Scene {
   constructor() {
@@ -30,6 +30,7 @@ export default class LobbyScene extends Phaser.Scene {
     this.user = getStoredUser();
     this.snapshot = null;
     this._subs = [];
+    this.currentTab = data.tab || 'lobby';
   }
 
   create() {
@@ -61,17 +62,28 @@ export default class LobbyScene extends Phaser.Scene {
   }
 
   _render() {
+    this._cleanup();
     this.children.removeAll(true);
     this._drawBackground();
     this._drawTopBar();
+    if (this.currentTab === 'promo') {
+      this._drawPromotionPage();
+    } else if (this.currentTab === 'profile') {
+      this._drawProfilePage();
+    } else {
+      this._drawLobbyContent();
+    }
+    this._drawBottomNav();
+    this._floatGold();
+  }
+
+  _drawLobbyContent() {
     this._drawWallet();
     this._drawPromoStrip();
     this._drawCategories();
     this._drawGameCard();
     this._drawStats();
     this._drawHistory();
-    this._drawBottomNav();
-    this._floatGold();
   }
 
   _drawBackground() {
@@ -301,6 +313,166 @@ export default class LobbyScene extends Phaser.Scene {
     });
   }
 
+  _drawPromotionPage() {
+    const x = 14;
+    const y = 76;
+    const w = W - 28;
+
+    this._text(x + 2, y - 20, 'PROMOCAO', {
+      fontSize: '18px',
+      fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#ffdf72',
+    });
+
+    const banner = this.add.graphics();
+    banner.fillGradientStyle(0xf7c948, 0xf7c948, 0xb0162b, 0xb0162b, 1);
+    banner.fillRoundedRect(x, y, w, 176, 12);
+    banner.lineStyle(2, 0xfff0a6, 0.72);
+    banner.strokeRoundedRect(x, y, w, 176, 12);
+    banner.fillStyle(0x4a0612, 0.24);
+    banner.fillCircle(x + w - 46, y + 46, 82);
+    banner.fillStyle(0xffffff, 0.13);
+    banner.fillCircle(x + 46, y + 136, 74);
+
+    this._text(x + 22, y + 18, 'RECARGUE E GANHE', {
+      fontSize: '15px',
+      fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#3a050f',
+    });
+    this._text(x + 22, y + 44, '100%', {
+      fontSize: '58px',
+      fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#fff7dc',
+      stroke: '#641017',
+      strokeThickness: 5,
+    });
+    this._text(x + 176, y + 76, 'DO VALOR EM', {
+      fontSize: '13px',
+      fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#ffe8ac',
+    });
+    this._text(x + 176, y + 98, 'bonus', {
+      fontSize: '10px',
+      fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#ffe8ac',
+      minFontSize: 10,
+    });
+    this._text(x + 22, y + 126, 'Oferta valida para recargas selecionadas', {
+      fontSize: '12px',
+      color: '#fff0c6',
+    });
+
+    this._smallButton(x + 216, y + 128, 124, 34, 'RECARREGAR', 0x2b0a12, 0x721521, () => this._openModal('deposit'));
+
+    const detailsY = y + 200;
+    const details = this.add.graphics();
+    details.fillStyle(0x17111d, 0.94);
+    details.fillRoundedRect(x, detailsY, w, 174, 10);
+    details.lineStyle(1, CLR.line, 0.82);
+    details.strokeRoundedRect(x, detailsY, w, 174, 10);
+
+    this._text(x + 18, detailsY + 18, 'COMO FICA NA CONTA', {
+      fontSize: '14px',
+      fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#ffdf72',
+    });
+
+    this._promoLine(x + 18, detailsY + 56, 'Recarga', 'R$ 50,00');
+    this._promoLine(x + 18, detailsY + 88, 'Bonus', '+ R$ 50,00', '#80ffd7');
+    this._promoLine(x + 18, detailsY + 120, 'Total', 'R$ 100,00', CLR.white);
+  }
+
+  _promoLine(x, y, label, value, color = CLR.muted) {
+    this._text(x, y, label, {
+      fontSize: '13px',
+      color,
+    }).setOrigin(0, 0.5);
+    this._text(W - 32, y, value, {
+      fontSize: '15px',
+      fontFamily: '"Arial Black", Arial, sans-serif',
+      color,
+    }).setOrigin(1, 0.5);
+  }
+
+  _drawProfilePage() {
+    const user = this.snapshot?.user || this.user || {};
+    const stats = this.snapshot?.stats || { rounds: 0, maxMult: 1, winRate: 0 };
+    const x = 14;
+    const y = 76;
+    const w = W - 28;
+
+    this._text(x + 2, y - 20, 'PERFIL', {
+      fontSize: '18px',
+      fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#ffdf72',
+    });
+
+    const card = this.add.graphics();
+    card.fillGradientStyle(0x2d1014, 0x2d1014, 0x0d0b15, 0x0d0b15, 1);
+    card.fillRoundedRect(x, y, w, 184, 12);
+    card.lineStyle(2, CLR.gold, 0.54);
+    card.strokeRoundedRect(x, y, w, 184, 12);
+
+    this._pill(x + 20, y + 20, 64, 64, CLR.red, CLR.goldLight, 0.94);
+    this._text(x + 52, y + 52, String(user.username || 'S').slice(0, 1).toUpperCase(), {
+      fontSize: '30px',
+      fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#ffeb9a',
+    }).setOrigin(0.5);
+
+    this._text(x + 102, y + 22, user.username || 'jogadora', {
+      fontSize: '23px',
+      fontFamily: '"Arial Black", Arial, sans-serif',
+      color: CLR.white,
+    });
+    this._badge(x + 102, y + 58, (user.role || 'player').toUpperCase(), user.role === 'admin' ? 0x604000 : 0x123d2d, '#ffe58d');
+    this._profileRow(x + 20, y + 106, 'Email', user.email || '-');
+    this._profileRow(x + 20, y + 136, 'Telefone', user.phone || '-');
+
+    const statsY = y + 206;
+    const items = [
+      { label: 'Rodadas', value: String(stats.rounds || 0) },
+      { label: 'Maior mult', value: `${Number(stats.maxMult || 1).toFixed(2)}x` },
+      { label: 'Vitorias', value: `${stats.winRate || 0}%` },
+    ];
+
+    items.forEach((item, index) => {
+      const sx = x + index * 122;
+      const g = this.add.graphics();
+      g.fillStyle(CLR.panel, 0.94);
+      g.fillRoundedRect(sx, statsY, 112, 66, 8);
+      g.lineStyle(1, CLR.line, 0.76);
+      g.strokeRoundedRect(sx, statsY, 112, 66, 8);
+      this._text(sx + 12, statsY + 13, item.label, {
+        fontSize: '12px',
+        color: CLR.muted,
+      });
+      this._text(sx + 12, statsY + 34, item.value, {
+        fontSize: '20px',
+        fontFamily: '"Arial Black", Arial, sans-serif',
+        color: CLR.white,
+      });
+    });
+
+    this._smallButton(x + 20, statsY + 96, 134, 36, 'Atualizar', 0xd59d19, 0x6d120e, () => this._loadLobby());
+    this._smallButton(x + 170, statsY + 96, 134, 36, 'Sair', 0x20263a, 0x101521, () => {
+      clearSession();
+      this.scene.start('Auth');
+    });
+  }
+
+  _profileRow(x, y, label, value) {
+    this._text(x, y, label, {
+      fontSize: '12px',
+      color: CLR.muted,
+    }).setOrigin(0, 0.5);
+    this._text(x + 82, y, value, {
+      fontSize: '13px',
+      color: '#fff0c6',
+      wordWrap: { width: W - x - 108 },
+    }).setOrigin(0, 0.5);
+  }
+
   _drawBottomNav() {
     const g = this.add.graphics();
     const navHeight = 44;
@@ -311,20 +483,33 @@ export default class LobbyScene extends Phaser.Scene {
     g.lineBetween(0, navTop, W, navTop);
 
     const nav = [
-      ['Lobby', 64],
-      ['Carteira', W / 2],
-      ['Perfil', W - 64],
+      ['Lobby', 64, 'lobby'],
+      ['Promocao', W / 2, 'promo'],
+      ['Perfil', W - 64, 'profile'],
     ];
-    nav.forEach(([label, x], index) => {
-      this._text(x, H - 27, index === 0 ? '◆' : '◇', {
+    nav.forEach(([label, x, tab]) => {
+      const active = this.currentTab === tab;
+      if (active) {
+        this._pill(x - 43, H - 39, 86, 32, 0x241509, CLR.gold, 0.78);
+      }
+      this._text(x, H - 27, active ? '◆' : '◇', {
         fontSize: '13px',
-        color: index === 0 ? '#ffdf72' : '#b69085',
+        color: active ? '#ffdf72' : '#b69085',
       }).setOrigin(0.5);
       this._text(x, H - 10, label, {
-        fontSize: '9px',
-        color: index === 0 ? '#ffdf72' : '#b69085',
+        fontSize: '10px',
+        color: active ? '#ffdf72' : '#b69085',
       }).setOrigin(0.5);
+      this.add.zone(x, H - 22, 104, 42)
+        .setInteractive({ useHandCursor: true })
+        .on('pointerdown', () => this._switchTab(tab));
     });
+  }
+
+  _switchTab(tab) {
+    if (this.currentTab === tab) return;
+    this.currentTab = tab;
+    this._render();
   }
 
   _playButton(x, y, w, h) {
@@ -471,11 +656,12 @@ export default class LobbyScene extends Phaser.Scene {
 
   _text(x, y, text, style = {}) {
     const fontSize = parseInt(style.fontSize || '14', 10);
+    const { minFontSize = 12, ...textStyle } = style;
     const crispStyle = {
       fontFamily: FONT_BODY,
       resolution: TEXT_RESOLUTION,
-      ...style,
-      fontSize: `${Math.max(fontSize, 11)}px`,
+      ...textStyle,
+      fontSize: `${Math.max(fontSize, minFontSize)}px`,
     };
     const obj = this.add.text(x, y, text, crispStyle);
 
