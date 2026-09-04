@@ -1,5 +1,21 @@
 export const W = 390;
-export const H = 680;
+
+function getMobileHeight() {
+  if (typeof window === 'undefined') return 760;
+
+  const viewport = window.visualViewport || window;
+  const width = Math.max(1, viewport.width || window.innerWidth || W);
+  const height = Math.max(1, viewport.height || window.innerHeight || 760);
+  const ratio = clamp(height / width, 1.74, 2.24);
+
+  return Math.round(W * ratio);
+}
+
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
+
+export const H = getMobileHeight();
 export const BETS = [2, 5, 10, 20, 50];
 export const GRAVITY = 880;
 export const FLAP = -430;

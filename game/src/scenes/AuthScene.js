@@ -40,6 +40,7 @@ export default class AuthScene extends Phaser.Scene {
 
   _renderAuthPanel(error = '') {
     const isLogin = this.mode === 'login';
+    const safeError = this._escapeHtml(error);
     this.root.innerHTML = `
       <style>
         .sereia-auth-root {
@@ -48,31 +49,37 @@ export default class AuthScene extends Phaser.Scene {
           z-index: 20;
           display: grid;
           place-items: center;
-          padding: 18px;
+          padding: max(14px, env(safe-area-inset-top)) 14px max(14px, env(safe-area-inset-bottom));
           font-family: Arial, Helvetica, sans-serif;
           color: #fff7d6;
           pointer-events: none;
+          overflow-y: auto;
+          -webkit-overflow-scrolling: touch;
         }
         .sereia-auth-card {
-          width: min(360px, calc(100vw - 30px));
+          width: min(366px, calc(100vw - 22px));
+          max-height: calc(100dvh - 22px);
+          overflow-y: auto;
           border: 1px solid rgba(242, 201, 76, 0.58);
           background:
             linear-gradient(180deg, rgba(92, 8, 22, 0.97), rgba(9, 8, 20, 0.98)),
             radial-gradient(circle at top right, rgba(242, 201, 76, 0.22), transparent 40%);
           box-shadow: 0 18px 60px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.12);
           border-radius: 18px;
-          padding: 20px;
+          padding: ${isLogin ? '20px' : '16px'};
           pointer-events: auto;
+          scrollbar-width: none;
         }
-        .sereia-brand { text-align: center; margin-bottom: 16px; }
-        .sereia-brand-mark { font-size: 44px; line-height: 1; filter: drop-shadow(0 8px 18px rgba(242,201,76,.24)); }
+        .sereia-auth-card::-webkit-scrollbar { display: none; }
+        .sereia-brand { text-align: center; margin-bottom: ${isLogin ? '16px' : '10px'}; }
+        .sereia-brand-mark { font-size: ${isLogin ? '44px' : '34px'}; line-height: 1; filter: drop-shadow(0 8px 18px rgba(242,201,76,.24)); }
         .sereia-title {
-          margin-top: 8px;
-          font: 900 25px/1.05 "Arial Black", Arial, sans-serif;
+          margin-top: ${isLogin ? '8px' : '5px'};
+          font: 900 ${isLogin ? '25px' : '22px'}/1.05 "Arial Black", Arial, sans-serif;
           color: #ffd766;
           text-shadow: 0 2px 0 #5d1600;
         }
-        .sereia-subtitle { margin-top: 6px; color: #f7b7a3; font-size: 12px; }
+        .sereia-subtitle { margin-top: 6px; color: #ffd0be; font-size: 13px; }
         .sereia-tabs {
           display: grid;
           grid-template-columns: 1fr 1fr;
@@ -80,40 +87,42 @@ export default class AuthScene extends Phaser.Scene {
           padding: 4px;
           border-radius: 12px;
           background: rgba(0,0,0,.28);
-          margin-bottom: 14px;
+          margin-bottom: ${isLogin ? '14px' : '10px'};
         }
         .sereia-tab {
           border: 0;
           border-radius: 9px;
-          padding: 11px 8px;
+          padding: 12px 8px;
           background: transparent;
           color: #ffdca0;
           font-weight: 800;
+          font-size: 14px;
           cursor: pointer;
         }
         .sereia-tab.active {
           color: #230009;
           background: linear-gradient(180deg, #ffe58d, #e7ad27);
         }
-        .sereia-field { margin: 10px 0; }
+        .sereia-field { margin: ${isLogin ? '10px' : '8px'} 0; }
         .sereia-field label {
           display: block;
           margin: 0 0 6px;
           color: #ffc4aa;
-          font-size: 11px;
+          font-size: 12px;
           font-weight: 800;
           text-transform: uppercase;
         }
         .sereia-field input {
           width: 100%;
-          height: 46px;
+          height: 48px;
           border: 1px solid rgba(255, 215, 102, .22);
           border-radius: 10px;
           background: rgba(5, 7, 18, .76);
           color: #fff;
-          font-size: 15px;
+          font-size: 16px;
           outline: none;
           padding: 0 12px;
+          box-shadow: inset 0 1px 0 rgba(255,255,255,.06);
         }
         .sereia-field input:focus {
           border-color: #ffd766;
@@ -121,13 +130,13 @@ export default class AuthScene extends Phaser.Scene {
         }
         .sereia-submit {
           width: 100%;
-          height: 50px;
+          min-height: 52px;
           margin-top: 12px;
           border: 0;
           border-radius: 12px;
           background: linear-gradient(180deg, #ffdf72, #d49216 52%, #b4212b);
           color: #210007;
-          font: 900 15px "Arial Black", Arial, sans-serif;
+          font: 900 16px "Arial Black", Arial, sans-serif;
           cursor: pointer;
           box-shadow: 0 9px 0 rgba(74,0,12,.72), 0 18px 32px rgba(0,0,0,.35);
         }
@@ -136,13 +145,14 @@ export default class AuthScene extends Phaser.Scene {
           min-height: 18px;
           margin-top: 10px;
           color: #ff9aa9;
-          font-size: 12px;
+          font-size: 13px;
+          line-height: 1.3;
           text-align: center;
         }
         .sereia-footer {
           margin-top: 12px;
-          color: #bd7b72;
-          font-size: 11px;
+          color: #dca197;
+          font-size: 12px;
           text-align: center;
         }
       </style>
@@ -159,23 +169,23 @@ export default class AuthScene extends Phaser.Scene {
         ${isLogin ? '' : `
           <div class="sereia-field">
             <label>Telefone celular</label>
-            <input name="phone" autocomplete="tel" inputmode="tel" placeholder="11999999999" />
+            <input name="phone" autocomplete="tel" inputmode="tel" placeholder="11999999999" minlength="8" maxlength="24" required />
           </div>
           <div class="sereia-field">
             <label>Email</label>
-            <input name="email" autocomplete="email" inputmode="email" placeholder="voce@email.com" />
+            <input name="email" autocomplete="email" inputmode="email" placeholder="voce@email.com" maxlength="120" required />
           </div>
         `}
         <div class="sereia-field">
           <label>Usuario</label>
-          <input name="username" autocomplete="username" placeholder="seu_usuario" />
+          <input name="username" autocomplete="username" autocapitalize="none" spellcheck="false" placeholder="seu_usuario" minlength="3" maxlength="24" required />
         </div>
         <div class="sereia-field">
           <label>Senha</label>
-          <input name="password" autocomplete="${isLogin ? 'current-password' : 'new-password'}" type="password" placeholder="Sua senha" />
+          <input name="password" autocomplete="${isLogin ? 'current-password' : 'new-password'}" type="password" placeholder="Sua senha" minlength="${isLogin ? '1' : '6'}" maxlength="128" required />
         </div>
         <button class="sereia-submit" type="submit">${isLogin ? 'ENTRAR NO LOBBY' : 'CRIAR CONTA'}</button>
-        <div class="sereia-error">${error}</div>
+        <div class="sereia-error">${safeError}</div>
         <div class="sereia-footer">18+ Jogue com responsabilidade</div>
       </form>
     `;
@@ -195,16 +205,41 @@ export default class AuthScene extends Phaser.Scene {
     const form = event.currentTarget;
     const submit = form.querySelector('.sereia-submit');
     const values = Object.fromEntries(new FormData(form).entries());
+    const username = String(values.username || '').trim();
+    const password = String(values.password || '');
+    const phone = String(values.phone || '').replace(/[^\d+]/g, '').trim();
+    const email = String(values.email || '').trim().toLowerCase();
+
+    if (!username || !password || (this.mode !== 'login' && (!phone || !email))) {
+      this._renderAuthPanel('Preencha todos os campos.');
+      return;
+    }
+
+    if (this.mode === 'register') {
+      if (phone.length < 8) {
+        this._renderAuthPanel('Informe um telefone celular valido.');
+        return;
+      }
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+        this._renderAuthPanel('Informe um email valido.');
+        return;
+      }
+      if (password.length < 6) {
+        this._renderAuthPanel('A senha precisa ter pelo menos 6 caracteres.');
+        return;
+      }
+    }
+
     submit.disabled = true;
 
     try {
       const response = this.mode === 'login'
-        ? await login(values.username.trim(), values.password)
+        ? await login(username, password)
         : await register({
-          phone: values.phone.trim(),
-          email: values.email.trim(),
-          username: values.username.trim(),
-          password: values.password,
+          phone,
+          email,
+          username,
+          password,
         });
 
       setSession(response.token, response.user);
@@ -219,5 +254,15 @@ export default class AuthScene extends Phaser.Scene {
       this.root.remove();
       this.root = null;
     }
+  }
+
+  _escapeHtml(value) {
+    return String(value || '').replace(/[&<>"']/g, (char) => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#039;',
+    })[char]);
   }
 }

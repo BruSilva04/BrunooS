@@ -135,7 +135,7 @@ export default class LobbyScene extends Phaser.Scene {
 
   _drawWallet() {
     const x = 14;
-    const y = 68;
+    const y = this._y(68, 0.08, 14);
     const w = W - 28;
     const h = 96;
     const g = this.add.graphics();
@@ -163,7 +163,7 @@ export default class LobbyScene extends Phaser.Scene {
   }
 
   _drawPromoStrip() {
-    const y = 176;
+    const y = this._y(176, 0.12, 20);
     const g = this.add.graphics();
     g.fillGradientStyle(0xcf2038, 0xcf2038, 0x7c1021, 0x7c1021, 1);
     g.fillRoundedRect(14, y, W - 28, 68, 10);
@@ -191,14 +191,15 @@ export default class LobbyScene extends Phaser.Scene {
   }
 
   _drawCategories() {
+    const y = this._y(256, 0.18, 32);
     const labels = ['Hot', 'Slots', 'Crash', 'VIP'];
     labels.forEach((label, index) => {
       const x = 14 + index * 92;
       const active = index === 0;
       const bg = active ? CLR.gold : 0x211521;
       const border = active ? CLR.goldLight : CLR.line;
-      this._pill(x, 256, 82, 32, bg, border, active ? 1 : 0.86);
-      this._text(x + 41, 272, label, {
+      this._pill(x, y, 82, 32, bg, border, active ? 1 : 0.86);
+      this._text(x + 41, y + 16, label, {
         fontSize: '12px',
         fontFamily: '"Arial Black", Arial, sans-serif',
         color: active ? '#330009' : '#ffdca0',
@@ -208,7 +209,7 @@ export default class LobbyScene extends Phaser.Scene {
 
   _drawGameCard() {
     const x = 14;
-    const y = 302;
+    const y = this._y(302, 0.25, 46);
     const w = W - 28;
     const h = 156;
     const g = this.add.graphics();
@@ -247,6 +248,7 @@ export default class LobbyScene extends Phaser.Scene {
 
   _drawStats() {
     const stats = this.snapshot?.stats || { rounds: 0, maxMult: 1, winRate: 0 };
+    const y = this._y(472, 0.43, 78);
     const items = [
       { label: 'Rodadas', value: String(stats.rounds || 0) },
       { label: 'Maior mult', value: `${Number(stats.maxMult || 1).toFixed(2)}x` },
@@ -257,14 +259,14 @@ export default class LobbyScene extends Phaser.Scene {
       const x = 14 + index * 122;
       const g = this.add.graphics();
       g.fillStyle(CLR.panel, 0.92);
-      g.fillRoundedRect(x, 472, 112, 58, 8);
+      g.fillRoundedRect(x, y, 112, 58, 8);
       g.lineStyle(1, CLR.line, 0.7);
-      g.strokeRoundedRect(x, 472, 112, 58, 8);
-      this._text(x + 12, 483, item.label, {
+      g.strokeRoundedRect(x, y, 112, 58, 8);
+      this._text(x + 12, y + 11, item.label, {
         fontSize: '9px',
         color: CLR.muted,
       });
-      this._text(x + 12, 500, item.value, {
+      this._text(x + 12, y + 28, item.value, {
         fontSize: '18px',
         fontFamily: '"Arial Black", Arial, sans-serif',
         color: CLR.white,
@@ -273,7 +275,7 @@ export default class LobbyScene extends Phaser.Scene {
   }
 
   _drawHistory() {
-    const y = 536;
+    const y = Math.min(H - 144, this._y(536, 0.64, 118));
     const history = this.snapshot?.history || [];
     this._text(16, y, 'ULTIMAS RODADAS', {
       fontSize: '10px',
@@ -652,6 +654,10 @@ export default class LobbyScene extends Phaser.Scene {
       if (item && item.destroy) item.destroy();
     });
     this._subs = [];
+  }
+
+  _y(base, factor, maxShift) {
+    return Math.round(base + Math.min(Math.max(0, H - 680) * factor, maxShift));
   }
 
   _text(x, y, text, style = {}) {
