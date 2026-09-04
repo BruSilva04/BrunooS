@@ -11,8 +11,25 @@ export const GEM_BONUS = 0.07;
 const runtimeHost = window.location.hostname || 'localhost';
 const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
 
-export const API_URL = import.meta.env.VITE_API_URL || `${window.location.protocol}//${runtimeHost}:8000`;
-export const WS_URL = import.meta.env.VITE_WS_URL || `${wsProtocol}://${runtimeHost}:8000/ws/game`;
+function normalizeEnvUrl(value, envName) {
+  const rawValue = String(value || '').trim();
+  const assignmentPrefix = `${envName}=`;
+  const url = rawValue.startsWith(assignmentPrefix)
+    ? rawValue.slice(assignmentPrefix.length).trim()
+    : rawValue;
+
+  return url.replace(/\/+$/, '');
+}
+
+export const API_URL = normalizeEnvUrl(
+  import.meta.env.VITE_API_URL,
+  'VITE_API_URL'
+) || `${window.location.protocol}//${runtimeHost}:8000`;
+
+export const WS_URL = normalizeEnvUrl(
+  import.meta.env.VITE_WS_URL,
+  'VITE_WS_URL'
+) || `${wsProtocol}://${runtimeHost}:8000/ws/game`;
 
 // Global Wallet & iGaming History State
 export const state = {
