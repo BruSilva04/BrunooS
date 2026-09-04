@@ -13,8 +13,14 @@ new Phaser.Game({
   parent: 'game',
   backgroundColor: '#000510',
   scene: [BootScene, AuthScene, LobbyScene, MenuScene, GameScene],
-  resolution: Math.min(window.devicePixelRatio || 1, 2),
+  resolution: Math.min(Math.max(window.devicePixelRatio || 1, 2), 3),
   antialias: true,
+  render: {
+    antialias: true,
+    antialiasGL: true,
+    pixelArt: false,
+    roundPixels: false
+  },
   scale: {
     mode: Phaser.Scale.FIT,
     autoCenter: Phaser.Scale.CENTER_BOTH

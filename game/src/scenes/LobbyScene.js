@@ -12,10 +12,13 @@ const CLR = {
   cyan: 0x37d9ff,
   panel: 0x17111d,
   line: 0x70421e,
-  muted: '#b98d78',
+  muted: '#e0b39a',
   white: '#fff7dc',
   danger: '#ff6b7b',
 };
+
+const FONT_BODY = 'Arial, Helvetica, sans-serif';
+const TEXT_RESOLUTION = 3;
 
 export default class LobbyScene extends Phaser.Scene {
   constructor() {
@@ -50,7 +53,7 @@ export default class LobbyScene extends Phaser.Scene {
 
   _drawLoading() {
     this._drawBackground();
-    this.add.text(W / 2, H / 2, 'Carregando lobby...', {
+    this._text(W / 2, H / 2, 'Carregando lobby...', {
       fontSize: '18px',
       fontFamily: '"Arial Black", Arial, sans-serif',
       color: '#ffdf72',
@@ -95,18 +98,18 @@ export default class LobbyScene extends Phaser.Scene {
   _drawTopBar() {
     const y = 14;
     this._pill(14, y, 38, 38, CLR.red, CLR.gold, 0.95);
-    this.add.text(33, y + 19, 'S', {
+    this._text(33, y + 19, 'S', {
       fontSize: '22px',
       fontFamily: '"Arial Black", Arial, sans-serif',
       color: '#ffeb9a',
     }).setOrigin(0.5);
 
-    this.add.text(62, y + 2, 'SEREIA PALACE', {
+    this._text(62, y + 2, 'SEREIA PALACE', {
       fontSize: '18px',
       fontFamily: '"Arial Black", Arial, sans-serif',
       color: '#ffdf72',
     });
-    this.add.text(63, y + 24, `${this.user?.username || 'jogadora'} · ${this.user?.role || 'player'}`, {
+    this._text(63, y + 24, `${this.user?.username || 'jogadora'} · ${this.user?.role || 'player'}`, {
       fontSize: '10px',
       color: CLR.muted,
     });
@@ -132,12 +135,12 @@ export default class LobbyScene extends Phaser.Scene {
     g.fillStyle(CLR.gold, 0.18);
     g.fillCircle(x + w - 36, y + 28, 54);
 
-    this.add.text(x + 16, y + 13, 'SALDO DISPONIVEL', {
+    this._text(x + 16, y + 13, 'SALDO DISPONIVEL', {
       fontSize: '10px',
       fontFamily: '"Arial Black", Arial, sans-serif',
       color: '#eebc6b',
     });
-    this.add.text(x + 16, y + 32, `R$ ${state.balance.toFixed(2)}`, {
+    this._text(x + 16, y + 32, `R$ ${state.balance.toFixed(2)}`, {
       fontSize: '34px',
       fontFamily: '"Arial Black", Arial, sans-serif',
       color: CLR.white,
@@ -155,19 +158,19 @@ export default class LobbyScene extends Phaser.Scene {
     g.lineStyle(1, CLR.goldLight, 0.56);
     g.strokeRoundedRect(14, y, W - 28, 68, 10);
 
-    this.add.text(30, y + 11, 'EXCLUSIVO', {
+    this._text(30, y + 11, 'EXCLUSIVO', {
       fontSize: '10px',
       fontFamily: '"Arial Black", Arial, sans-serif',
       color: '#350006',
       backgroundColor: '#ffdf72',
       padding: { x: 8, y: 3 },
     });
-    this.add.text(30, y + 34, 'Mergulho Premiado', {
+    this._text(30, y + 34, 'Mergulho Premiado', {
       fontSize: '20px',
       fontFamily: '"Arial Black", Arial, sans-serif',
       color: CLR.white,
     });
-    this.add.text(W - 24, y + 18, '95%\nRTP', {
+    this._text(W - 24, y + 18, '95%\nRTP', {
       fontSize: '18px',
       fontFamily: '"Arial Black", Arial, sans-serif',
       color: '#ffdf72',
@@ -183,7 +186,7 @@ export default class LobbyScene extends Phaser.Scene {
       const bg = active ? CLR.gold : 0x211521;
       const border = active ? CLR.goldLight : CLR.line;
       this._pill(x, 256, 82, 32, bg, border, active ? 1 : 0.86);
-      this.add.text(x + 41, 272, label, {
+      this._text(x + 41, 272, label, {
         fontSize: '12px',
         fontFamily: '"Arial Black", Arial, sans-serif',
         color: active ? '#330009' : '#ffdca0',
@@ -211,15 +214,15 @@ export default class LobbyScene extends Phaser.Scene {
     g.fillCircle(x + 80, y + 66, 54);
     g.fillStyle(CLR.gold, 0.16);
     g.fillCircle(x + 112, y + 40, 22);
-    this.add.text(x + 78, y + 62, '🧜‍♀️', { fontSize: '52px' }).setOrigin(0.5);
-    this.add.text(x + 118, y + 106, '💎', { fontSize: '25px' }).setOrigin(0.5);
+    this._text(x + 78, y + 62, '🧜‍♀️', { fontSize: '52px' }).setOrigin(0.5);
+    this._text(x + 118, y + 106, '💎', { fontSize: '25px' }).setOrigin(0.5);
 
-    this.add.text(x + 160, y + 18, 'Sereia do Tesouro', {
+    this._text(x + 160, y + 18, 'Sereia do Tesouro', {
       fontSize: '21px',
       fontFamily: '"Arial Black", Arial, sans-serif',
       color: '#ffdf72',
     });
-    this.add.text(x + 160, y + 48, 'Runner crash · Cash Out', {
+    this._text(x + 160, y + 48, 'Runner crash · Cash Out', {
       fontSize: '11px',
       color: '#e3a992',
     });
@@ -245,11 +248,11 @@ export default class LobbyScene extends Phaser.Scene {
       g.fillRoundedRect(x, 472, 112, 58, 8);
       g.lineStyle(1, CLR.line, 0.7);
       g.strokeRoundedRect(x, 472, 112, 58, 8);
-      this.add.text(x + 12, 483, item.label, {
+      this._text(x + 12, 483, item.label, {
         fontSize: '9px',
         color: CLR.muted,
       });
-      this.add.text(x + 12, 500, item.value, {
+      this._text(x + 12, 500, item.value, {
         fontSize: '18px',
         fontFamily: '"Arial Black", Arial, sans-serif',
         color: CLR.white,
@@ -258,16 +261,16 @@ export default class LobbyScene extends Phaser.Scene {
   }
 
   _drawHistory() {
-    const y = 548;
+    const y = 536;
     const history = this.snapshot?.history || [];
-    this.add.text(16, y, 'ULTIMAS RODADAS', {
+    this._text(16, y, 'ULTIMAS RODADAS', {
       fontSize: '10px',
       fontFamily: '"Arial Black", Arial, sans-serif',
       color: '#eebc6b',
     });
 
     if (!history.length) {
-      this.add.text(W / 2, y + 38, 'Sem rodadas ainda', {
+      this._text(W / 2, y + 38, 'Sem rodadas ainda', {
         fontSize: '12px',
         color: CLR.muted,
       }).setOrigin(0.5);
@@ -275,22 +278,22 @@ export default class LobbyScene extends Phaser.Scene {
     }
 
     history.slice(0, 3).forEach((round, index) => {
-      const rowY = y + 18 + index * 28;
+      const rowY = y + 18 + index * 26;
       const won = !!round.won;
       const g = this.add.graphics();
       g.fillStyle(won ? 0x0d2b24 : 0x301018, 0.94);
       g.fillRoundedRect(14, rowY, W - 28, 24, 6);
-      this.add.text(26, rowY + 12, won ? 'WIN' : 'LOSS', {
+      this._text(26, rowY + 12, won ? 'WIN' : 'LOSS', {
         fontSize: '9px',
         fontFamily: '"Arial Black", Arial, sans-serif',
         color: won ? '#80ffd7' : CLR.danger,
       }).setOrigin(0, 0.5);
-      this.add.text(86, rowY + 12, `${Number(round.mult || 1).toFixed(2)}x`, {
+      this._text(86, rowY + 12, `${Number(round.mult || 1).toFixed(2)}x`, {
         fontSize: '12px',
         fontFamily: '"Arial Black", Arial, sans-serif',
         color: CLR.white,
       }).setOrigin(0, 0.5);
-      this.add.text(W - 22, rowY + 12, `${won ? '+' : ''}R$ ${Number(round.payout || 0).toFixed(2)}`, {
+      this._text(W - 22, rowY + 12, `${won ? '+' : ''}R$ ${Number(round.payout || 0).toFixed(2)}`, {
         fontSize: '12px',
         fontFamily: '"Arial Black", Arial, sans-serif',
         color: won ? '#80ffd7' : CLR.danger,
@@ -300,10 +303,12 @@ export default class LobbyScene extends Phaser.Scene {
 
   _drawBottomNav() {
     const g = this.add.graphics();
+    const navHeight = 44;
+    const navTop = H - navHeight;
     g.fillStyle(0x090710, 0.97);
-    g.fillRect(0, H - 54, W, 54);
+    g.fillRect(0, navTop, W, navHeight);
     g.lineStyle(1, CLR.gold, 0.30);
-    g.lineBetween(0, H - 54, W, H - 54);
+    g.lineBetween(0, navTop, W, navTop);
 
     const nav = [
       ['Lobby', 64],
@@ -311,13 +316,13 @@ export default class LobbyScene extends Phaser.Scene {
       ['Perfil', W - 64],
     ];
     nav.forEach(([label, x], index) => {
-      this.add.text(x, H - 32, index === 0 ? '◆' : '◇', {
+      this._text(x, H - 27, index === 0 ? '◆' : '◇', {
         fontSize: '13px',
-        color: index === 0 ? '#ffdf72' : '#85625f',
+        color: index === 0 ? '#ffdf72' : '#b69085',
       }).setOrigin(0.5);
-      this.add.text(x, H - 14, label, {
+      this._text(x, H - 10, label, {
         fontSize: '9px',
-        color: index === 0 ? '#ffdf72' : '#85625f',
+        color: index === 0 ? '#ffdf72' : '#b69085',
       }).setOrigin(0.5);
     });
   }
@@ -328,7 +333,7 @@ export default class LobbyScene extends Phaser.Scene {
     g.fillRoundedRect(x, y, w, h, 8);
     g.lineStyle(1, 0xffffff, 0.35);
     g.strokeRoundedRect(x, y, w, h, 8);
-    this.add.text(x + w / 2, y + h / 2, 'JOGAR AGORA', {
+    this._text(x + w / 2, y + h / 2, 'JOGAR AGORA', {
       fontSize: '14px',
       fontFamily: '"Arial Black", Arial, sans-serif',
       color: '#330009',
@@ -344,7 +349,7 @@ export default class LobbyScene extends Phaser.Scene {
     g.fillRoundedRect(x, y, w, h, 7);
     g.lineStyle(1, 0xffffff, 0.18);
     g.strokeRoundedRect(x, y, w, h, 7);
-    this.add.text(x + w / 2, y + h / 2, label, {
+    this._text(x + w / 2, y + h / 2, label, {
       fontSize: '11px',
       fontFamily: '"Arial Black", Arial, sans-serif',
       color: CLR.white,
@@ -356,7 +361,7 @@ export default class LobbyScene extends Phaser.Scene {
 
   _iconButton(x, y, label, callback) {
     this._pill(x, y, 36, 34, 0x1d1320, CLR.line, 0.9);
-    this.add.text(x + 18, y + 17, label, {
+    this._text(x + 18, y + 17, label, {
       fontSize: '17px',
       color: '#ffdf72',
     }).setOrigin(0.5);
@@ -374,11 +379,11 @@ export default class LobbyScene extends Phaser.Scene {
   }
 
   _badge(x, y, label, fill, color) {
-    const width = label.length * 7 + 20;
+    const width = label.length * 8 + 24;
     const g = this.add.graphics();
     g.fillStyle(fill, 0.96);
     g.fillRoundedRect(x, y, width, 22, 6);
-    this.add.text(x + width / 2, y + 11, label, {
+    this._text(x + width / 2, y + 11, label, {
       fontSize: '9px',
       fontFamily: '"Arial Black", Arial, sans-serif',
       color,
@@ -398,12 +403,12 @@ export default class LobbyScene extends Phaser.Scene {
     g.lineStyle(2, CLR.gold, 0.58);
     g.strokeRoundedRect(x, y, w, h, 12);
 
-    const title = this.add.text(W / 2, y + 34, isDeposit ? 'Depositar via Pix' : 'Sacar via Pix', {
+    const title = this._text(W / 2, y + 34, isDeposit ? 'Depositar via Pix' : 'Sacar via Pix', {
       fontSize: '18px',
       fontFamily: '"Arial Black", Arial, sans-serif',
       color: '#ffdf72',
     }).setOrigin(0.5);
-    const desc = this.add.text(W / 2, y + 94, isDeposit
+    const desc = this._text(W / 2, y + 94, isDeposit
       ? 'Integracao Pix entra na proxima etapa.'
       : 'Saque Pix sera liberado apos wallet real.', {
       fontSize: '13px',
@@ -411,13 +416,13 @@ export default class LobbyScene extends Phaser.Scene {
       align: 'center',
       wordWrap: { width: w - 42 },
     }).setOrigin(0.5);
-    const status = this.add.text(W / 2, y + 136, 'EM DESENVOLVIMENTO', {
+    const status = this._text(W / 2, y + 136, 'EM DESENVOLVIMENTO', {
       fontSize: '11px',
       fontFamily: '"Arial Black", Arial, sans-serif',
       color: '#8d6c61',
     }).setOrigin(0.5);
 
-    const closeText = this.add.text(W / 2, y + h - 34, 'FECHAR', {
+    const closeText = this._text(W / 2, y + h - 34, 'FECHAR', {
       fontSize: '13px',
       fontFamily: '"Arial Black", Arial, sans-serif',
       color: '#330009',
@@ -462,5 +467,23 @@ export default class LobbyScene extends Phaser.Scene {
       if (item && item.destroy) item.destroy();
     });
     this._subs = [];
+  }
+
+  _text(x, y, text, style = {}) {
+    const fontSize = parseInt(style.fontSize || '14', 10);
+    const crispStyle = {
+      fontFamily: FONT_BODY,
+      resolution: TEXT_RESOLUTION,
+      ...style,
+      fontSize: `${Math.max(fontSize, 11)}px`,
+    };
+    const obj = this.add.text(x, y, text, crispStyle);
+
+    if (!style.backgroundColor && !style.shadow) {
+      const shadowBlur = fontSize >= 18 ? 3 : 1;
+      obj.setShadow(0, 1, 'rgba(0, 0, 0, 0.65)', shadowBlur);
+    }
+
+    return obj;
   }
 }
