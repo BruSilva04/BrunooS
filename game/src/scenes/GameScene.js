@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { W, H, OBS_DELAY_START, GEM_DELAY, MULT_TICK, GEM_BONUS, WS_URL, state, addHistory } from '../config.js';
+import { W, H, OBS_DELAY_START, GEM_DELAY, MULT_TICK, GEM_BONUS, CASHOUT_UNLOCK_MULT, WS_URL, state, addHistory } from '../config.js';
 import Mermaid from '../objects/Mermaid.js';
 import Obstacle from '../objects/Obstacle.js';
 import Gem from '../objects/Gem.js';
@@ -78,6 +78,7 @@ export default class GameScene extends Phaser.Scene {
           this._serverCrash(data.multiplier);
         } else if (data.type === 'death_registered') {
           console.log('Crash point was: ' + data.crash_point + 'x');
+          this._applyLossResult(this.mult);
         } else if (data.type === 'error') {
           this._handleServerError(data.message);
         }
@@ -154,6 +155,8 @@ export default class GameScene extends Phaser.Scene {
   }
 
   _cashOut() {
+    if (this.mult < CASHOUT_UNLOCK_MULT) return;
+
     this.cashed = true;
     this._stopTimers();
     this.sounds.playCashout();
@@ -181,9 +184,12 @@ export default class GameScene extends Phaser.Scene {
 
     if (this.ws && this.ws.readyState === WebSocket.OPEN && this.roundId) {
       this.ws.send(JSON.stringify({ action: 'death', round_id: this.roundId, client_mult: this.mult }));
+      this.time.delayedCall(900, () => {
+        if (!this.resultShown) this._applyLossResult(this.mult);
+      });
+    } else {
+      this._applyLossResult(this.mult);
     }
-
-    this._applyLossResult(this.mult);
   }
 
   _serverCrash(multiplier) {

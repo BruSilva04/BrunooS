@@ -162,7 +162,7 @@ export default class LobbyScene extends Phaser.Scene {
 
       <section class="history-panel">
         <h3>ULTIMAS RODADAS</h3>
-        ${history.length ? history.slice(0, 3).map((round) => this._historyRowHtml(round)).join('') : '<p class="empty-state">Sem rodadas ainda</p>'}
+        ${history.length ? history.slice(0, 5).map((round) => this._historyRowHtml(round)).join('') : '<p class="empty-state">Sem rodadas ainda</p>'}
       </section>
     `;
   }

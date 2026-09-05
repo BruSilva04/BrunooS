@@ -38,6 +38,7 @@ async function request(path, options = {}) {
   let response;
   try {
     response = await fetch(`${API_URL}${path}`, {
+      cache: 'no-store',
       ...options,
       headers,
     });

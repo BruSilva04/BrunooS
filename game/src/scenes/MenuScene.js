@@ -7,7 +7,7 @@ export default class MenuScene extends Phaser.Scene {
   }
 
   create() {
-    this.bet = 10;
+    this.bet = BETS[0];
     this.betButtons = [];
     this.bubbles = [];
 

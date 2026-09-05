@@ -10,8 +10,9 @@ from db.database import adjust_user_balance, get_user_by_id, save_round, update_
 
 router = APIRouter()
 
-MULTIPLIER_PER_SECOND = 0.12
-ALLOWED_BETS = {2.0, 5.0, 10.0, 20.0, 50.0}
+MULTIPLIER_PER_SECOND = 0.085
+CASHOUT_UNLOCK_MULT = 2.5
+ALLOWED_BETS = {20.0, 50.0, 100.0, 200.0, 500.0}
 
 
 def current_multiplier(round_state: dict) -> float:
@@ -147,6 +148,13 @@ async def game_websocket(websocket: WebSocket):
                 server_mult = current_multiplier(active_round)
                 crash_point = active_round["crash_point"]
                 bet = active_round["bet"]
+
+                if server_mult < CASHOUT_UNLOCK_MULT:
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": f"Cash Out disponivel apenas a partir de {CASHOUT_UNLOCK_MULT:.2f}x"
+                    })
+                    continue
                 
                 success, payout = calculate_payout(bet, server_mult, crash_point)
                 

@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { W, H } from '../config.js';
+import { W, H, CASHOUT_UNLOCK_MULT } from '../config.js';
 
 export default class HUD {
   constructor(scene, bet) {
@@ -9,6 +9,7 @@ export default class HUD {
 
     this._drawTopBar(bet);
     this._drawCashOutButton();
+    this.hideCashOut();
   }
 
   _drawTopBar(bet) {
@@ -111,6 +112,10 @@ export default class HUD {
     this.cashValue.setText(`R$ ${gain.toFixed(2)}`);
     this.depthTxt.setText(`PROFUNDIDADE ${Math.floor((mult - 1) * 80)}M`);
 
+    if (mult >= CASHOUT_UNLOCK_MULT) {
+      this.showCashOut();
+    }
+
     if (mult >= 3) {
       this.multTxt.setColor('#ffde73');
       this._paintCashButton(0x16a34a, 0x047857);
@@ -128,6 +133,16 @@ export default class HUD {
     [this.cashShadow, this.cashBg, this.cashText, this.cashValue, this.cashHit].forEach((item) => {
       if (item) item.setVisible(false);
     });
+    if (this.cashHit) this.cashHit.disableInteractive();
+  }
+
+  showCashOut() {
+    [this.cashShadow, this.cashBg, this.cashText, this.cashValue, this.cashHit].forEach((item) => {
+      if (item) item.setVisible(true);
+    });
+    if (this.cashHit && !this.cashHit.input) {
+      this.cashHit.setInteractive({ useHandCursor: true });
+    }
   }
 
   showResult(won, amount, mult, bet) {
