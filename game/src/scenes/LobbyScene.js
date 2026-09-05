@@ -7,18 +7,13 @@ const CLR = {
   red: 0x9f1426,
   redDark: 0x4a0612,
   gold: 0xf4c84a,
-  goldLight: 0xffe58d,
-  jade: 0x21d6a2,
-  cyan: 0x37d9ff,
-  panel: 0x17111d,
-  line: 0x70421e,
-  muted: '#e0b39a',
-  white: '#fff7dc',
-  danger: '#ff6b7b',
 };
 
-const FONT_BODY = 'Arial, Helvetica, sans-serif';
-const TEXT_RESOLUTION = 4;
+const TABS = [
+  { key: 'lobby', label: 'Lobby' },
+  { key: 'promo', label: 'Promo&ccedil;&atilde;o' },
+  { key: 'profile', label: 'Perfil' },
+];
 
 export default class LobbyScene extends Phaser.Scene {
   constructor() {
@@ -29,12 +24,17 @@ export default class LobbyScene extends Phaser.Scene {
     this.fallbackBalance = data.balance;
     this.user = getStoredUser();
     this.snapshot = null;
-    this._subs = [];
     this.currentTab = data.tab || 'lobby';
+    this.modal = null;
+    this._subs = [];
+    this.root = null;
   }
 
   create() {
-    this._drawLoading();
+    this._drawBackground();
+    this._mountLobby();
+    this._renderLoading();
+    this._floatGold();
     this._loadLobby();
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this._cleanup());
   }
@@ -45,6 +45,7 @@ export default class LobbyScene extends Phaser.Scene {
       this.user = this.snapshot.user;
       state.balance = Number(this.snapshot.balance || 0);
       state.history = (this.snapshot.history || []).map((round) => Number(round.mult || 1)).slice(0, 5);
+      this.modal = null;
       this._render();
     } catch {
       clearSession();
@@ -52,38 +53,283 @@ export default class LobbyScene extends Phaser.Scene {
     }
   }
 
-  _drawLoading() {
-    this._drawBackground();
-    this._text(W / 2, H / 2, 'Carregando lobby...', {
-      fontSize: '18px',
-      fontFamily: '"Arial Black", Arial, sans-serif',
-      color: '#ffdf72',
-    }).setOrigin(0.5);
+  _mountLobby() {
+    this.root = document.createElement('div');
+    this.root.className = 'sereia-lobby-root';
+    document.body.appendChild(this.root);
+  }
+
+  _renderLoading() {
+    if (!this.root) return;
+    this.root.innerHTML = `
+      ${this._style()}
+      <main class="lobby-shell loading-shell">
+        <section class="loading-card">
+          <div class="brand-orb">S</div>
+          <strong>Carregando lobby</strong>
+          <span>Preparando sua conta...</span>
+        </section>
+      </main>
+    `;
   }
 
   _render() {
-    this._cleanup();
-    this.children.removeAll(true);
-    this._drawBackground();
-    this._drawTopBar();
-    if (this.currentTab === 'promo') {
-      this._drawPromotionPage();
-    } else if (this.currentTab === 'profile') {
-      this._drawProfilePage();
-    } else {
-      this._drawLobbyContent();
-    }
-    this._drawBottomNav();
-    this._floatGold();
+    if (!this.root) return;
+    this.root.innerHTML = `
+      ${this._style()}
+      <main class="lobby-shell">
+        ${this._topBarHtml()}
+        <section class="lobby-content">
+          ${this.currentTab === 'promo' ? this._promoHtml() : ''}
+          ${this.currentTab === 'profile' ? this._profileHtml() : ''}
+          ${this.currentTab === 'lobby' ? this._lobbyHtml() : ''}
+        </section>
+        ${this._bottomNavHtml()}
+      </main>
+      ${this.modal ? this._modalHtml(this.modal) : ''}
+    `;
+    this._bindDom();
   }
 
-  _drawLobbyContent() {
-    this._drawWallet();
-    this._drawPromoStrip();
-    this._drawCategories();
-    this._drawGameCard();
-    this._drawStats();
-    this._drawHistory();
+  _topBarHtml() {
+    const user = this.snapshot?.user || this.user || {};
+    return `
+      <header class="topbar">
+        <div class="brand-lockup">
+          <div class="brand-orb">S</div>
+          <div>
+            <h1>SEREIA PALACE</h1>
+            <p>${this._escape(user.username || 'jogadora')} &middot; ${this._escape(user.role || 'player')}</p>
+          </div>
+        </div>
+        <div class="top-actions">
+          <button class="icon-btn" type="button" data-action="refresh" aria-label="Atualizar">&#8635;</button>
+          <button class="icon-btn" type="button" data-action="logout" aria-label="Sair">&times;</button>
+        </div>
+      </header>
+    `;
+  }
+
+  _lobbyHtml() {
+    const stats = this.snapshot?.stats || { rounds: 0, maxMult: 1, winRate: 0 };
+    const history = this.snapshot?.history || [];
+
+    return `
+      <section class="wallet-card">
+        <span>SALDO DISPONIVEL</span>
+        <strong>${this._money(state.balance)}</strong>
+        <div class="wallet-actions">
+          <button class="gold-btn" type="button" data-action="deposit">Depositar</button>
+          <button class="dark-btn" type="button" data-action="withdraw">Sacar Pix</button>
+        </div>
+      </section>
+
+      <button class="promo-strip" type="button" data-tab="promo">
+        <span>EXCLUSIVO</span>
+        <strong>Mergulho Premiado</strong>
+        <em>95%<small>RTP</small></em>
+      </button>
+
+      <nav class="category-row" aria-label="Categorias">
+        <span class="active">Hot</span>
+        <span>Slots</span>
+        <span>Crash</span>
+        <span>VIP</span>
+      </nav>
+
+      <section class="game-card">
+        <div class="game-art">
+          <div class="art-glow"></div>
+          <div class="mermaid-mark">S</div>
+          <div class="gem-mark"></div>
+        </div>
+        <div class="game-info">
+          <h2>Sereia do Tesouro</h2>
+          <p>Runner crash &middot; Cash Out</p>
+          <div class="badges">
+            <span>AO VIVO</span>
+            <span>UNICO JOGO</span>
+          </div>
+          <button class="play-btn" type="button" data-action="play">JOGAR AGORA</button>
+        </div>
+      </section>
+
+      <section class="stats-grid">
+        ${this._statHtml('Rodadas', stats.rounds || 0)}
+        ${this._statHtml('Maior mult', `${Number(stats.maxMult || 1).toFixed(2)}x`)}
+        ${this._statHtml('Vitorias', `${stats.winRate || 0}%`)}
+      </section>
+
+      <section class="history-panel">
+        <h3>ULTIMAS RODADAS</h3>
+        ${history.length ? history.slice(0, 3).map((round) => this._historyRowHtml(round)).join('') : '<p class="empty-state">Sem rodadas ainda</p>'}
+      </section>
+    `;
+  }
+
+  _promoHtml() {
+    return `
+      <section class="page-heading">
+        <h2>PROMOCAO</h2>
+        <p>Campanhas ativas da Sereia Palace</p>
+      </section>
+
+      <section class="bonus-banner">
+        <div class="bonus-copy">
+          <span>RECARGUE E GANHE</span>
+          <strong>100%</strong>
+          <p>DO VALOR EM <small>bonus</small></p>
+        </div>
+        <button type="button" data-action="deposit">RECARREGAR</button>
+      </section>
+
+      <section class="promo-ledger">
+        <h3>COMO FICA NA CONTA</h3>
+        ${this._promoLineHtml('Recarga', 'R$ 50,00')}
+        ${this._promoLineHtml('Bonus', '+ R$ 50,00', true)}
+        ${this._promoLineHtml('Total', 'R$ 100,00', true)}
+        <p>Oferta valida para recargas selecionadas. Deposito real ainda nao esta conectado.</p>
+      </section>
+    `;
+  }
+
+  _profileHtml() {
+    const user = this.snapshot?.user || this.user || {};
+    const stats = this.snapshot?.stats || { rounds: 0, maxMult: 1, winRate: 0 };
+    const initial = String(user.username || 'S').slice(0, 1).toUpperCase();
+
+    return `
+      <section class="page-heading">
+        <h2>PERFIL</h2>
+        <p>Dados da sua conta</p>
+      </section>
+
+      <section class="profile-card">
+        <div class="profile-head">
+          <div class="profile-avatar">${this._escape(initial)}</div>
+          <div>
+            <h2>${this._escape(user.username || 'jogadora')}</h2>
+            <span>${this._escape(user.role || 'player')}</span>
+          </div>
+        </div>
+        ${this._profileRowHtml('Email', user.email || '-')}
+        ${this._profileRowHtml('Telefone', user.phone || '-')}
+      </section>
+
+      <section class="stats-grid profile-stats">
+        ${this._statHtml('Rodadas', stats.rounds || 0)}
+        ${this._statHtml('Maior mult', `${Number(stats.maxMult || 1).toFixed(2)}x`)}
+        ${this._statHtml('Vitorias', `${stats.winRate || 0}%`)}
+      </section>
+
+      <section class="profile-actions">
+        <button class="gold-btn" type="button" data-action="refresh">Atualizar</button>
+        <button class="dark-btn" type="button" data-action="logout">Sair</button>
+      </section>
+    `;
+  }
+
+  _bottomNavHtml() {
+    return `
+      <nav class="bottom-nav">
+        ${TABS.map((tab) => `
+          <button class="${this.currentTab === tab.key ? 'active' : ''}" type="button" data-tab="${tab.key}">
+            <span>${this.currentTab === tab.key ? '◆' : '◇'}</span>
+            ${tab.label}
+          </button>
+        `).join('')}
+      </nav>
+    `;
+  }
+
+  _modalHtml(type) {
+    const isDeposit = type === 'deposit';
+    return `
+      <div class="modal-backdrop" data-action="close-modal">
+        <section class="modal-card" role="dialog" aria-modal="true" aria-label="${isDeposit ? 'Depositar via Pix' : 'Sacar via Pix'}">
+          <h2>${isDeposit ? 'Depositar via Pix' : 'Sacar via Pix'}</h2>
+          <p>${isDeposit ? 'Integracao Pix entra na proxima etapa.' : 'Saque Pix sera liberado apos wallet real.'}</p>
+          <span>EM DESENVOLVIMENTO</span>
+          <button type="button" data-action="close-modal">FECHAR</button>
+        </section>
+      </div>
+    `;
+  }
+
+  _statHtml(label, value) {
+    return `
+      <article>
+        <span>${this._escape(label)}</span>
+        <strong>${this._escape(value)}</strong>
+      </article>
+    `;
+  }
+
+  _historyRowHtml(round) {
+    const won = !!round.won;
+    const payout = Number(round.payout || 0);
+    return `
+      <div class="history-row ${won ? 'won' : 'lost'}">
+        <span>${won ? 'WIN' : 'LOSS'}</span>
+        <strong>${Number(round.mult || 1).toFixed(2)}x</strong>
+        <em>${won ? '+' : ''}${this._money(payout)}</em>
+      </div>
+    `;
+  }
+
+  _promoLineHtml(label, value, strong = false) {
+    return `
+      <div class="promo-line ${strong ? 'strong' : ''}">
+        <span>${this._escape(label)}</span>
+        <strong>${this._escape(value)}</strong>
+      </div>
+    `;
+  }
+
+  _profileRowHtml(label, value) {
+    return `
+      <div class="profile-row">
+        <span>${this._escape(label)}</span>
+        <strong>${this._escape(value)}</strong>
+      </div>
+    `;
+  }
+
+  _bindDom() {
+    this.root.querySelectorAll('[data-tab]').forEach((button) => {
+      button.addEventListener('click', () => {
+        this.currentTab = button.dataset.tab;
+        this.modal = null;
+        this._render();
+      });
+    });
+
+    this.root.querySelectorAll('[data-action]').forEach((button) => {
+      button.addEventListener('click', (event) => {
+        const action = button.dataset.action;
+        if (action === 'close-modal') {
+          event.stopPropagation();
+          this.modal = null;
+          this._render();
+        } else if (action === 'deposit' || action === 'withdraw') {
+          this.modal = action;
+          this._render();
+        } else if (action === 'refresh') {
+          this._renderLoading();
+          this._loadLobby();
+        } else if (action === 'logout') {
+          clearSession();
+          this.scene.start('Auth');
+        } else if (action === 'play') {
+          this.scene.start('Menu', { balance: state.balance });
+        }
+      });
+    });
+
+    const modalCard = this.root.querySelector('.modal-card');
+    if (modalCard) {
+      modalCard.addEventListener('click', (event) => event.stopPropagation());
+    }
   }
 
   _drawBackground() {
@@ -107,531 +353,16 @@ export default class LobbyScene extends Phaser.Scene {
     g.strokeCircle(-16, H - 26, 116);
   }
 
-  _drawTopBar() {
-    const y = 14;
-    this._pill(14, y, 38, 38, CLR.red, CLR.gold, 0.95);
-    this._text(33, y + 19, 'S', {
-      fontSize: '22px',
-      fontFamily: '"Arial Black", Arial, sans-serif',
-      color: '#ffeb9a',
-    }).setOrigin(0.5);
-
-    this._text(62, y + 2, 'SEREIA PALACE', {
-      fontSize: '18px',
-      fontFamily: '"Arial Black", Arial, sans-serif',
-      color: '#ffdf72',
-    });
-    this._text(63, y + 24, `${this.user?.username || 'jogadora'} · ${this.user?.role || 'player'}`, {
-      fontSize: '10px',
-      color: CLR.muted,
-    });
-
-    this._iconButton(W - 92, y + 2, '⟳', () => this._loadLobby());
-    this._iconButton(W - 48, y + 2, '⎋', () => {
-      clearSession();
-      this.scene.start('Auth');
-    });
-  }
-
-  _drawWallet() {
-    const x = 14;
-    const y = this._y(68, 0.08, 14);
-    const w = W - 28;
-    const h = 96;
-    const g = this.add.graphics();
-    g.fillGradientStyle(0x2d1014, 0x2d1014, 0x0e0b12, 0x0e0b12, 1);
-    g.fillRoundedRect(x, y, w, h, 10);
-    g.lineStyle(1, CLR.gold, 0.50);
-    g.strokeRoundedRect(x, y, w, h, 10);
-
-    g.fillStyle(CLR.gold, 0.18);
-    g.fillCircle(x + w - 36, y + 28, 54);
-
-    this._text(x + 16, y + 13, 'SALDO DISPONIVEL', {
-      fontSize: '10px',
-      fontFamily: '"Arial Black", Arial, sans-serif',
-      color: '#eebc6b',
-    });
-    this._text(x + 16, y + 32, `R$ ${state.balance.toFixed(2)}`, {
-      fontSize: '34px',
-      fontFamily: '"Arial Black", Arial, sans-serif',
-      color: CLR.white,
-    });
-
-    this._smallButton(x + 18, y + 70, 102, 28, '+ Depositar', 0xd59d19, 0x6d120e, () => this._openModal('deposit'));
-    this._smallButton(x + 130, y + 70, 96, 28, 'Sacar Pix', 0x17233a, 0x385a90, () => this._openModal('withdraw'));
-  }
-
-  _drawPromoStrip() {
-    const y = this._y(176, 0.12, 20);
-    const g = this.add.graphics();
-    g.fillGradientStyle(0xcf2038, 0xcf2038, 0x7c1021, 0x7c1021, 1);
-    g.fillRoundedRect(14, y, W - 28, 68, 10);
-    g.lineStyle(1, CLR.goldLight, 0.56);
-    g.strokeRoundedRect(14, y, W - 28, 68, 10);
-
-    this._text(30, y + 11, 'EXCLUSIVO', {
-      fontSize: '10px',
-      fontFamily: '"Arial Black", Arial, sans-serif',
-      color: '#350006',
-      backgroundColor: '#ffdf72',
-      padding: { x: 8, y: 3 },
-    });
-    this._text(30, y + 34, 'Mergulho Premiado', {
-      fontSize: '20px',
-      fontFamily: '"Arial Black", Arial, sans-serif',
-      color: CLR.white,
-    });
-    this._text(W - 24, y + 18, '95%\nRTP', {
-      fontSize: '18px',
-      fontFamily: '"Arial Black", Arial, sans-serif',
-      color: '#ffdf72',
-      align: 'right',
-    }).setOrigin(1, 0);
-  }
-
-  _drawCategories() {
-    const y = this._y(256, 0.18, 32);
-    const labels = ['Hot', 'Slots', 'Crash', 'VIP'];
-    labels.forEach((label, index) => {
-      const x = 14 + index * 92;
-      const active = index === 0;
-      const bg = active ? CLR.gold : 0x211521;
-      const border = active ? CLR.goldLight : CLR.line;
-      this._pill(x, y, 82, 32, bg, border, active ? 1 : 0.86);
-      this._text(x + 41, y + 16, label, {
-        fontSize: '12px',
-        fontFamily: '"Arial Black", Arial, sans-serif',
-        color: active ? '#330009' : '#ffdca0',
-      }).setOrigin(0.5);
-    });
-  }
-
-  _drawGameCard() {
-    const x = 14;
-    const y = this._y(302, 0.25, 46);
-    const w = W - 28;
-    const h = 156;
-    const g = this.add.graphics();
-    g.fillGradientStyle(0x201019, 0x201019, 0x080c18, 0x080c18, 1);
-    g.fillRoundedRect(x, y, w, h, 12);
-    g.lineStyle(2, CLR.gold, 0.72);
-    g.strokeRoundedRect(x, y, w, h, 12);
-
-    g.fillGradientStyle(0x113251, 0x113251, 0x041120, 0x041120, 1);
-    g.fillRoundedRect(x + 12, y + 14, 132, 128, 10);
-    g.lineStyle(1, CLR.cyan, 0.28);
-    g.strokeRoundedRect(x + 12, y + 14, 132, 128, 10);
-
-    g.fillStyle(0x37d9ff, 0.12);
-    g.fillCircle(x + 80, y + 66, 54);
-    g.fillStyle(CLR.gold, 0.16);
-    g.fillCircle(x + 112, y + 40, 22);
-    this._text(x + 78, y + 62, '🧜‍♀️', { fontSize: '52px' }).setOrigin(0.5);
-    this._text(x + 118, y + 106, '💎', { fontSize: '25px' }).setOrigin(0.5);
-
-    this._text(x + 160, y + 18, 'Sereia do Tesouro', {
-      fontSize: '21px',
-      fontFamily: '"Arial Black", Arial, sans-serif',
-      color: '#ffdf72',
-    });
-    this._text(x + 160, y + 48, 'Runner crash · Cash Out', {
-      fontSize: '11px',
-      color: '#e3a992',
-    });
-
-    this._badge(x + 160, y + 75, 'AO VIVO', 0x123d2d, '#80ffd7');
-    this._badge(x + 232, y + 75, 'UNICO JOGO', 0x3f1420, '#ffdca0');
-
-    this._playButton(x + 160, y + 108, w - 174, 38);
-  }
-
-  _drawStats() {
-    const stats = this.snapshot?.stats || { rounds: 0, maxMult: 1, winRate: 0 };
-    const y = this._y(472, 0.43, 78);
-    const items = [
-      { label: 'Rodadas', value: String(stats.rounds || 0) },
-      { label: 'Maior mult', value: `${Number(stats.maxMult || 1).toFixed(2)}x` },
-      { label: 'Vitorias', value: `${stats.winRate || 0}%` },
-    ];
-
-    items.forEach((item, index) => {
-      const x = 14 + index * 122;
-      const g = this.add.graphics();
-      g.fillStyle(CLR.panel, 0.92);
-      g.fillRoundedRect(x, y, 112, 58, 8);
-      g.lineStyle(1, CLR.line, 0.7);
-      g.strokeRoundedRect(x, y, 112, 58, 8);
-      this._text(x + 12, y + 11, item.label, {
-        fontSize: '9px',
-        color: CLR.muted,
-      });
-      this._text(x + 12, y + 28, item.value, {
-        fontSize: '18px',
-        fontFamily: '"Arial Black", Arial, sans-serif',
-        color: CLR.white,
-      });
-    });
-  }
-
-  _drawHistory() {
-    const y = Math.min(H - 144, this._y(536, 0.64, 118));
-    const history = this.snapshot?.history || [];
-    this._text(16, y, 'ULTIMAS RODADAS', {
-      fontSize: '10px',
-      fontFamily: '"Arial Black", Arial, sans-serif',
-      color: '#eebc6b',
-    });
-
-    if (!history.length) {
-      this._text(W / 2, y + 38, 'Sem rodadas ainda', {
-        fontSize: '12px',
-        color: CLR.muted,
-      }).setOrigin(0.5);
-      return;
-    }
-
-    history.slice(0, 3).forEach((round, index) => {
-      const rowY = y + 18 + index * 26;
-      const won = !!round.won;
-      const g = this.add.graphics();
-      g.fillStyle(won ? 0x0d2b24 : 0x301018, 0.94);
-      g.fillRoundedRect(14, rowY, W - 28, 24, 6);
-      this._text(26, rowY + 12, won ? 'WIN' : 'LOSS', {
-        fontSize: '9px',
-        fontFamily: '"Arial Black", Arial, sans-serif',
-        color: won ? '#80ffd7' : CLR.danger,
-      }).setOrigin(0, 0.5);
-      this._text(86, rowY + 12, `${Number(round.mult || 1).toFixed(2)}x`, {
-        fontSize: '12px',
-        fontFamily: '"Arial Black", Arial, sans-serif',
-        color: CLR.white,
-      }).setOrigin(0, 0.5);
-      this._text(W - 22, rowY + 12, `${won ? '+' : ''}R$ ${Number(round.payout || 0).toFixed(2)}`, {
-        fontSize: '12px',
-        fontFamily: '"Arial Black", Arial, sans-serif',
-        color: won ? '#80ffd7' : CLR.danger,
-      }).setOrigin(1, 0.5);
-    });
-  }
-
-  _drawPromotionPage() {
-    const x = 14;
-    const y = 76;
-    const w = W - 28;
-
-    this._text(x + 2, y - 20, 'PROMOCAO', {
-      fontSize: '18px',
-      fontFamily: '"Arial Black", Arial, sans-serif',
-      color: '#ffdf72',
-    });
-
-    const banner = this.add.graphics();
-    banner.fillGradientStyle(0xf7c948, 0xf7c948, 0xb0162b, 0xb0162b, 1);
-    banner.fillRoundedRect(x, y, w, 176, 12);
-    banner.lineStyle(2, 0xfff0a6, 0.72);
-    banner.strokeRoundedRect(x, y, w, 176, 12);
-    banner.fillStyle(0x4a0612, 0.24);
-    banner.fillCircle(x + w - 46, y + 46, 82);
-    banner.fillStyle(0xffffff, 0.13);
-    banner.fillCircle(x + 46, y + 136, 74);
-
-    this._text(x + 22, y + 18, 'RECARGUE E GANHE', {
-      fontSize: '15px',
-      fontFamily: '"Arial Black", Arial, sans-serif',
-      color: '#3a050f',
-    });
-    this._text(x + 22, y + 44, '100%', {
-      fontSize: '58px',
-      fontFamily: '"Arial Black", Arial, sans-serif',
-      color: '#fff7dc',
-      stroke: '#641017',
-      strokeThickness: 5,
-    });
-    this._text(x + 176, y + 76, 'DO VALOR EM', {
-      fontSize: '13px',
-      fontFamily: '"Arial Black", Arial, sans-serif',
-      color: '#ffe8ac',
-    });
-    this._text(x + 176, y + 98, 'bonus', {
-      fontSize: '10px',
-      fontFamily: '"Arial Black", Arial, sans-serif',
-      color: '#ffe8ac',
-      minFontSize: 10,
-    });
-    this._text(x + 22, y + 126, 'Oferta valida para recargas selecionadas', {
-      fontSize: '12px',
-      color: '#fff0c6',
-    });
-
-    this._smallButton(x + 216, y + 128, 124, 34, 'RECARREGAR', 0x2b0a12, 0x721521, () => this._openModal('deposit'));
-
-    const detailsY = y + 200;
-    const details = this.add.graphics();
-    details.fillStyle(0x17111d, 0.94);
-    details.fillRoundedRect(x, detailsY, w, 174, 10);
-    details.lineStyle(1, CLR.line, 0.82);
-    details.strokeRoundedRect(x, detailsY, w, 174, 10);
-
-    this._text(x + 18, detailsY + 18, 'COMO FICA NA CONTA', {
-      fontSize: '14px',
-      fontFamily: '"Arial Black", Arial, sans-serif',
-      color: '#ffdf72',
-    });
-
-    this._promoLine(x + 18, detailsY + 56, 'Recarga', 'R$ 50,00');
-    this._promoLine(x + 18, detailsY + 88, 'Bonus', '+ R$ 50,00', '#80ffd7');
-    this._promoLine(x + 18, detailsY + 120, 'Total', 'R$ 100,00', CLR.white);
-  }
-
-  _promoLine(x, y, label, value, color = CLR.muted) {
-    this._text(x, y, label, {
-      fontSize: '13px',
-      color,
-    }).setOrigin(0, 0.5);
-    this._text(W - 32, y, value, {
-      fontSize: '15px',
-      fontFamily: '"Arial Black", Arial, sans-serif',
-      color,
-    }).setOrigin(1, 0.5);
-  }
-
-  _drawProfilePage() {
-    const user = this.snapshot?.user || this.user || {};
-    const stats = this.snapshot?.stats || { rounds: 0, maxMult: 1, winRate: 0 };
-    const x = 14;
-    const y = 76;
-    const w = W - 28;
-
-    this._text(x + 2, y - 20, 'PERFIL', {
-      fontSize: '18px',
-      fontFamily: '"Arial Black", Arial, sans-serif',
-      color: '#ffdf72',
-    });
-
-    const card = this.add.graphics();
-    card.fillGradientStyle(0x2d1014, 0x2d1014, 0x0d0b15, 0x0d0b15, 1);
-    card.fillRoundedRect(x, y, w, 184, 12);
-    card.lineStyle(2, CLR.gold, 0.54);
-    card.strokeRoundedRect(x, y, w, 184, 12);
-
-    this._pill(x + 20, y + 20, 64, 64, CLR.red, CLR.goldLight, 0.94);
-    this._text(x + 52, y + 52, String(user.username || 'S').slice(0, 1).toUpperCase(), {
-      fontSize: '30px',
-      fontFamily: '"Arial Black", Arial, sans-serif',
-      color: '#ffeb9a',
-    }).setOrigin(0.5);
-
-    this._text(x + 102, y + 22, user.username || 'jogadora', {
-      fontSize: '23px',
-      fontFamily: '"Arial Black", Arial, sans-serif',
-      color: CLR.white,
-    });
-    this._badge(x + 102, y + 58, (user.role || 'player').toUpperCase(), user.role === 'admin' ? 0x604000 : 0x123d2d, '#ffe58d');
-    this._profileRow(x + 20, y + 106, 'Email', user.email || '-');
-    this._profileRow(x + 20, y + 136, 'Telefone', user.phone || '-');
-
-    const statsY = y + 206;
-    const items = [
-      { label: 'Rodadas', value: String(stats.rounds || 0) },
-      { label: 'Maior mult', value: `${Number(stats.maxMult || 1).toFixed(2)}x` },
-      { label: 'Vitorias', value: `${stats.winRate || 0}%` },
-    ];
-
-    items.forEach((item, index) => {
-      const sx = x + index * 122;
-      const g = this.add.graphics();
-      g.fillStyle(CLR.panel, 0.94);
-      g.fillRoundedRect(sx, statsY, 112, 66, 8);
-      g.lineStyle(1, CLR.line, 0.76);
-      g.strokeRoundedRect(sx, statsY, 112, 66, 8);
-      this._text(sx + 12, statsY + 13, item.label, {
-        fontSize: '12px',
-        color: CLR.muted,
-      });
-      this._text(sx + 12, statsY + 34, item.value, {
-        fontSize: '20px',
-        fontFamily: '"Arial Black", Arial, sans-serif',
-        color: CLR.white,
-      });
-    });
-
-    this._smallButton(x + 20, statsY + 96, 134, 36, 'Atualizar', 0xd59d19, 0x6d120e, () => this._loadLobby());
-    this._smallButton(x + 170, statsY + 96, 134, 36, 'Sair', 0x20263a, 0x101521, () => {
-      clearSession();
-      this.scene.start('Auth');
-    });
-  }
-
-  _profileRow(x, y, label, value) {
-    this._text(x, y, label, {
-      fontSize: '12px',
-      color: CLR.muted,
-    }).setOrigin(0, 0.5);
-    this._text(x + 82, y, value, {
-      fontSize: '13px',
-      color: '#fff0c6',
-      wordWrap: { width: W - x - 108 },
-    }).setOrigin(0, 0.5);
-  }
-
-  _drawBottomNav() {
-    const g = this.add.graphics();
-    const navHeight = 44;
-    const navTop = H - navHeight;
-    g.fillStyle(0x090710, 0.97);
-    g.fillRect(0, navTop, W, navHeight);
-    g.lineStyle(1, CLR.gold, 0.30);
-    g.lineBetween(0, navTop, W, navTop);
-
-    const nav = [
-      ['Lobby', 64, 'lobby'],
-      ['Promocao', W / 2, 'promo'],
-      ['Perfil', W - 64, 'profile'],
-    ];
-    nav.forEach(([label, x, tab]) => {
-      const active = this.currentTab === tab;
-      if (active) {
-        this._pill(x - 43, H - 39, 86, 32, 0x241509, CLR.gold, 0.78);
-      }
-      this._text(x, H - 27, active ? '◆' : '◇', {
-        fontSize: '13px',
-        color: active ? '#ffdf72' : '#b69085',
-      }).setOrigin(0.5);
-      this._text(x, H - 10, label, {
-        fontSize: '10px',
-        color: active ? '#ffdf72' : '#b69085',
-      }).setOrigin(0.5);
-      this.add.zone(x, H - 22, 104, 42)
-        .setInteractive({ useHandCursor: true })
-        .on('pointerdown', () => this._switchTab(tab));
-    });
-  }
-
-  _switchTab(tab) {
-    if (this.currentTab === tab) return;
-    this.currentTab = tab;
-    this._render();
-  }
-
-  _playButton(x, y, w, h) {
-    const g = this.add.graphics();
-    g.fillGradientStyle(CLR.goldLight, CLR.goldLight, 0xd89819, 0xd89819, 1);
-    g.fillRoundedRect(x, y, w, h, 8);
-    g.lineStyle(1, 0xffffff, 0.35);
-    g.strokeRoundedRect(x, y, w, h, 8);
-    this._text(x + w / 2, y + h / 2, 'JOGAR AGORA', {
-      fontSize: '14px',
-      fontFamily: '"Arial Black", Arial, sans-serif',
-      color: '#330009',
-    }).setOrigin(0.5);
-    this.add.zone(x + w / 2, y + h / 2, w, h)
-      .setInteractive({ useHandCursor: true })
-      .on('pointerdown', () => this.scene.start('Menu', { balance: state.balance }));
-  }
-
-  _smallButton(x, y, w, h, label, topColor, bottomColor, callback) {
-    const g = this.add.graphics();
-    g.fillGradientStyle(topColor, topColor, bottomColor, bottomColor, 1);
-    g.fillRoundedRect(x, y, w, h, 7);
-    g.lineStyle(1, 0xffffff, 0.18);
-    g.strokeRoundedRect(x, y, w, h, 7);
-    this._text(x + w / 2, y + h / 2, label, {
-      fontSize: '11px',
-      fontFamily: '"Arial Black", Arial, sans-serif',
-      color: CLR.white,
-    }).setOrigin(0.5);
-    this.add.zone(x + w / 2, y + h / 2, w, h)
-      .setInteractive({ useHandCursor: true })
-      .on('pointerdown', callback);
-  }
-
-  _iconButton(x, y, label, callback) {
-    this._pill(x, y, 36, 34, 0x1d1320, CLR.line, 0.9);
-    this._text(x + 18, y + 17, label, {
-      fontSize: '17px',
-      color: '#ffdf72',
-    }).setOrigin(0.5);
-    this.add.zone(x + 18, y + 17, 36, 34)
-      .setInteractive({ useHandCursor: true })
-      .on('pointerdown', callback);
-  }
-
-  _pill(x, y, w, h, fill, stroke, alpha = 1) {
-    const g = this.add.graphics();
-    g.fillStyle(fill, alpha);
-    g.fillRoundedRect(x, y, w, h, h / 2);
-    g.lineStyle(1, stroke, 0.45);
-    g.strokeRoundedRect(x, y, w, h, h / 2);
-  }
-
-  _badge(x, y, label, fill, color) {
-    const width = label.length * 8 + 24;
-    const g = this.add.graphics();
-    g.fillStyle(fill, 0.96);
-    g.fillRoundedRect(x, y, width, 22, 6);
-    this._text(x + width / 2, y + 11, label, {
-      fontSize: '9px',
-      fontFamily: '"Arial Black", Arial, sans-serif',
-      color,
-    }).setOrigin(0.5);
-  }
-
-  _openModal(type) {
-    const isDeposit = type === 'deposit';
-    const overlay = this.add.rectangle(0, 0, W, H, 0x000000, 0.72).setOrigin(0).setInteractive();
-    const x = 34;
-    const y = 222;
-    const w = W - 68;
-    const h = 210;
-    const g = this.add.graphics();
-    g.fillStyle(0x190d16, 0.98);
-    g.fillRoundedRect(x, y, w, h, 12);
-    g.lineStyle(2, CLR.gold, 0.58);
-    g.strokeRoundedRect(x, y, w, h, 12);
-
-    const title = this._text(W / 2, y + 34, isDeposit ? 'Depositar via Pix' : 'Sacar via Pix', {
-      fontSize: '18px',
-      fontFamily: '"Arial Black", Arial, sans-serif',
-      color: '#ffdf72',
-    }).setOrigin(0.5);
-    const desc = this._text(W / 2, y + 94, isDeposit
-      ? 'Integracao Pix entra na proxima etapa.'
-      : 'Saque Pix sera liberado apos wallet real.', {
-      fontSize: '13px',
-      color: '#ffc4aa',
-      align: 'center',
-      wordWrap: { width: w - 42 },
-    }).setOrigin(0.5);
-    const status = this._text(W / 2, y + 136, 'EM DESENVOLVIMENTO', {
-      fontSize: '11px',
-      fontFamily: '"Arial Black", Arial, sans-serif',
-      color: '#8d6c61',
-    }).setOrigin(0.5);
-
-    const closeText = this._text(W / 2, y + h - 34, 'FECHAR', {
-      fontSize: '13px',
-      fontFamily: '"Arial Black", Arial, sans-serif',
-      color: '#330009',
-      backgroundColor: '#ffdf72',
-      padding: { x: 28, y: 8 },
-    }).setOrigin(0.5);
-    const closeHit = this.add.zone(W / 2, y + h - 34, 118, 40).setInteractive({ useHandCursor: true });
-    const close = () => [overlay, g, title, desc, status, closeText, closeHit].forEach((item) => item.destroy());
-    closeHit.on('pointerdown', close);
-    overlay.on('pointerdown', close);
-  }
-
   _floatGold() {
-    const dots = Array.from({ length: 16 }, () => {
+    const dots = Array.from({ length: 18 }, () => {
       const dot = this.add.circle(
         Phaser.Math.Between(0, W),
         Phaser.Math.Between(0, H),
         Phaser.Math.Between(1, 3),
         CLR.gold,
-        Phaser.Math.FloatBetween(0.10, 0.28),
+        Phaser.Math.FloatBetween(0.10, 0.25),
       );
-      return { dot, vy: Phaser.Math.Between(12, 34) };
+      return { dot, vy: Phaser.Math.Between(12, 30) };
     });
 
     this._subs.push(this.time.addEvent({
@@ -649,33 +380,680 @@ export default class LobbyScene extends Phaser.Scene {
     }));
   }
 
+  _style() {
+    return `
+      <style>
+        .sereia-lobby-root {
+          position: fixed;
+          inset: 0;
+          z-index: 18;
+          color: #fff7dc;
+          font-family: Arial, Helvetica, sans-serif;
+          -webkit-font-smoothing: antialiased;
+          text-rendering: geometricPrecision;
+          pointer-events: auto;
+          overflow-y: auto;
+          overscroll-behavior: contain;
+          -webkit-overflow-scrolling: touch;
+        }
+        .sereia-lobby-root * { box-sizing: border-box; }
+        .lobby-shell {
+          width: min(430px, 100vw);
+          min-height: 100dvh;
+          margin: 0 auto;
+          padding: max(14px, env(safe-area-inset-top)) 14px calc(62px + env(safe-area-inset-bottom));
+          pointer-events: auto;
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+        }
+        .loading-shell {
+          justify-content: center;
+          align-items: center;
+        }
+        .loading-card {
+          width: min(300px, calc(100vw - 36px));
+          padding: 24px 20px;
+          border-radius: 14px;
+          border: 1px solid rgba(244, 200, 74, 0.58);
+          background: linear-gradient(180deg, rgba(92, 8, 22, 0.95), rgba(8, 7, 17, 0.98));
+          box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+          display: grid;
+          justify-items: center;
+          gap: 8px;
+        }
+        .loading-card strong {
+          color: #ffdf72;
+          font-size: 18px;
+          font-weight: 900;
+        }
+        .loading-card span {
+          color: #ffd0be;
+          font-size: 13px;
+        }
+        .topbar {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          min-height: 46px;
+        }
+        .brand-lockup {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          min-width: 0;
+        }
+        .brand-orb {
+          width: 40px;
+          height: 40px;
+          border-radius: 50%;
+          display: grid;
+          place-items: center;
+          flex: 0 0 auto;
+          color: #ffeb9a;
+          font: 900 22px/1 "Arial Black", Arial, sans-serif;
+          background: radial-gradient(circle at 35% 24%, #e65b6a 0, #9f1426 50%, #4a0612 100%);
+          border: 1px solid rgba(255, 229, 141, 0.75);
+          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+        }
+        h1, h2, h3, p { margin: 0; }
+        .brand-lockup h1 {
+          color: #ffdf72;
+          font: 900 18px/1.05 "Arial Black", Arial, sans-serif;
+          text-shadow: 0 2px 0 #5d1600;
+        }
+        .brand-lockup p {
+          margin-top: 4px;
+          color: #e0b39a;
+          font-size: 12px;
+          font-weight: 700;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          max-width: 210px;
+        }
+        .top-actions {
+          display: flex;
+          gap: 8px;
+        }
+        button {
+          font-family: inherit;
+          border: 0;
+          cursor: pointer;
+          -webkit-tap-highlight-color: transparent;
+        }
+        .icon-btn {
+          width: 38px;
+          height: 36px;
+          border-radius: 10px;
+          color: #ffdf72;
+          font: 900 13px/1 "Arial Black", Arial, sans-serif;
+          background: rgba(29, 19, 32, 0.92);
+          border: 1px solid rgba(112, 66, 30, 0.82);
+        }
+        .lobby-content {
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+          min-height: 0;
+        }
+        .wallet-card,
+        .game-card,
+        .history-panel,
+        .promo-ledger,
+        .profile-card {
+          border-radius: 12px;
+          border: 1px solid rgba(244, 200, 74, 0.52);
+          background: linear-gradient(180deg, rgba(45, 16, 20, 0.95), rgba(14, 11, 18, 0.96));
+          box-shadow: 0 12px 34px rgba(0, 0, 0, 0.30), inset 0 1px 0 rgba(255, 255, 255, 0.08);
+        }
+        .wallet-card {
+          position: relative;
+          overflow: hidden;
+          padding: 16px 16px 14px;
+        }
+        .wallet-card::after {
+          content: "";
+          position: absolute;
+          width: 118px;
+          height: 118px;
+          right: -28px;
+          top: -34px;
+          border-radius: 50%;
+          background: rgba(244, 200, 74, 0.16);
+        }
+        .wallet-card > span,
+        .history-panel h3,
+        .promo-ledger h3 {
+          display: block;
+          color: #f4c84a;
+          font: 900 12px/1.1 "Arial Black", Arial, sans-serif;
+          margin-bottom: 7px;
+        }
+        .wallet-card > strong {
+          display: block;
+          position: relative;
+          z-index: 1;
+          color: #fff7dc;
+          font: 900 36px/1 "Arial Black", Arial, sans-serif;
+          text-shadow: 0 3px 0 rgba(0, 0, 0, 0.35);
+          margin-bottom: 12px;
+        }
+        .wallet-actions,
+        .profile-actions {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 10px;
+        }
+        .gold-btn,
+        .dark-btn,
+        .play-btn,
+        .bonus-banner button,
+        .modal-card button {
+          min-height: 42px;
+          border-radius: 10px;
+          font: 900 13px/1 "Arial Black", Arial, sans-serif;
+        }
+        .gold-btn {
+          color: #2a070c;
+          background: linear-gradient(180deg, #ffe58d, #d59d19 58%, #8d1c18);
+          box-shadow: 0 7px 0 rgba(74, 0, 12, 0.58);
+        }
+        .dark-btn {
+          color: #fff7dc;
+          background: linear-gradient(180deg, #17233a, #101521);
+          border: 1px solid rgba(84, 119, 177, 0.58);
+        }
+        .promo-strip {
+          width: 100%;
+          min-height: 72px;
+          border-radius: 12px;
+          padding: 12px 14px;
+          display: grid;
+          grid-template-columns: 1fr auto;
+          align-items: center;
+          text-align: left;
+          color: #fff7dc;
+          background: linear-gradient(180deg, #cf2038, #7c1021);
+          border: 1px solid rgba(255, 229, 141, 0.62);
+        }
+        .promo-strip span {
+          width: max-content;
+          padding: 4px 8px;
+          border-radius: 7px;
+          color: #350006;
+          background: #ffdf72;
+          font: 900 11px/1 "Arial Black", Arial, sans-serif;
+        }
+        .promo-strip strong {
+          display: block;
+          margin-top: 8px;
+          font: 900 21px/1 "Arial Black", Arial, sans-serif;
+        }
+        .promo-strip em {
+          grid-row: 1 / span 2;
+          grid-column: 2;
+          color: #ffdf72;
+          font: 900 22px/0.9 "Arial Black", Arial, sans-serif;
+          text-align: right;
+          font-style: normal;
+        }
+        .promo-strip small {
+          display: block;
+          margin-top: 4px;
+          font-size: 12px;
+        }
+        .category-row {
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
+          gap: 8px;
+        }
+        .category-row span {
+          min-height: 34px;
+          display: grid;
+          place-items: center;
+          border-radius: 999px;
+          color: #ffdca0;
+          background: rgba(33, 21, 33, 0.94);
+          border: 1px solid rgba(112, 66, 30, 0.70);
+          font: 900 13px/1 "Arial Black", Arial, sans-serif;
+        }
+        .category-row .active {
+          color: #330009;
+          background: linear-gradient(180deg, #ffe58d, #f4c84a);
+          border-color: #ffe58d;
+        }
+        .game-card {
+          display: grid;
+          grid-template-columns: 132px 1fr;
+          gap: 14px;
+          padding: 12px;
+        }
+        .game-art {
+          position: relative;
+          min-height: 132px;
+          border-radius: 12px;
+          overflow: hidden;
+          background: linear-gradient(180deg, #113251, #041120);
+          border: 1px solid rgba(55, 217, 255, 0.35);
+        }
+        .art-glow,
+        .mermaid-mark,
+        .gem-mark {
+          position: absolute;
+        }
+        .art-glow {
+          width: 106px;
+          height: 106px;
+          left: 12px;
+          top: 20px;
+          border-radius: 50%;
+          background: radial-gradient(circle, rgba(55, 217, 255, 0.28), rgba(55, 217, 255, 0.03) 64%);
+        }
+        .mermaid-mark {
+          width: 70px;
+          height: 70px;
+          left: 31px;
+          top: 30px;
+          display: grid;
+          place-items: center;
+          border-radius: 50%;
+          color: #ffdf72;
+          font: 900 46px/1 "Arial Black", Arial, sans-serif;
+          background: radial-gradient(circle at 35% 28%, #62f5e8, #1d7e9a 52%, #08243b);
+          border: 2px solid rgba(255, 229, 141, 0.75);
+        }
+        .gem-mark {
+          width: 28px;
+          height: 28px;
+          right: 18px;
+          bottom: 20px;
+          transform: rotate(45deg);
+          background: linear-gradient(135deg, #d7fbff, #37d9ff 45%, #0d7490);
+          border: 1px solid rgba(255, 255, 255, 0.70);
+          box-shadow: 0 0 18px rgba(55, 217, 255, 0.55);
+        }
+        .game-info {
+          min-width: 0;
+          display: flex;
+          flex-direction: column;
+          justify-content: space-between;
+        }
+        .game-info h2 {
+          color: #ffdf72;
+          font: 900 21px/1.05 "Arial Black", Arial, sans-serif;
+        }
+        .game-info p {
+          color: #ffd0be;
+          font-size: 13px;
+          font-weight: 700;
+        }
+        .badges {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 6px;
+        }
+        .badges span {
+          padding: 6px 8px;
+          border-radius: 7px;
+          color: #80ffd7;
+          background: #123d2d;
+          font: 900 10px/1 "Arial Black", Arial, sans-serif;
+        }
+        .badges span + span {
+          color: #ffdca0;
+          background: #3f1420;
+        }
+        .play-btn {
+          width: 100%;
+          color: #330009;
+          background: linear-gradient(180deg, #ffe58d, #d89819);
+          box-shadow: 0 7px 0 rgba(74, 0, 12, 0.62);
+        }
+        .stats-grid {
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 10px;
+        }
+        .stats-grid article {
+          min-height: 62px;
+          padding: 12px 10px;
+          border-radius: 10px;
+          background: rgba(23, 17, 29, 0.94);
+          border: 1px solid rgba(112, 66, 30, 0.76);
+        }
+        .stats-grid span {
+          display: block;
+          color: #e0b39a;
+          font-size: 12px;
+          font-weight: 800;
+          margin-bottom: 6px;
+        }
+        .stats-grid strong {
+          color: #fff7dc;
+          font: 900 19px/1 "Arial Black", Arial, sans-serif;
+        }
+        .history-panel {
+          padding: 13px 12px;
+        }
+        .history-row {
+          min-height: 32px;
+          padding: 7px 10px;
+          border-radius: 8px;
+          display: grid;
+          grid-template-columns: 62px 1fr auto;
+          align-items: center;
+          gap: 8px;
+          background: rgba(48, 16, 24, 0.94);
+          margin-top: 8px;
+        }
+        .history-row.won {
+          background: rgba(13, 43, 36, 0.94);
+        }
+        .history-row span,
+        .history-row strong,
+        .history-row em {
+          font: 900 13px/1 "Arial Black", Arial, sans-serif;
+          font-style: normal;
+        }
+        .history-row span,
+        .history-row em {
+          color: #ff6b7b;
+        }
+        .history-row.won span,
+        .history-row.won em {
+          color: #80ffd7;
+        }
+        .history-row strong {
+          color: #fff7dc;
+        }
+        .empty-state {
+          min-height: 54px;
+          display: grid;
+          place-items: center;
+          color: #e0b39a;
+          font-size: 14px;
+          font-weight: 700;
+        }
+        .page-heading {
+          padding: 2px 2px 0;
+        }
+        .page-heading h2 {
+          color: #ffdf72;
+          font: 900 20px/1 "Arial Black", Arial, sans-serif;
+        }
+        .page-heading p {
+          margin-top: 5px;
+          color: #ffd0be;
+          font-size: 13px;
+          font-weight: 700;
+        }
+        .bonus-banner {
+          min-height: 188px;
+          border-radius: 14px;
+          padding: 18px 20px;
+          position: relative;
+          overflow: hidden;
+          display: flex;
+          flex-direction: column;
+          justify-content: space-between;
+          background: linear-gradient(145deg, #f7c948 0%, #d79a21 42%, #b0162b 100%);
+          border: 2px solid rgba(255, 240, 166, 0.78);
+          box-shadow: 0 20px 50px rgba(0, 0, 0, 0.34);
+        }
+        .bonus-banner::before,
+        .bonus-banner::after {
+          content: "";
+          position: absolute;
+          border-radius: 50%;
+          pointer-events: none;
+        }
+        .bonus-banner::before {
+          width: 160px;
+          height: 160px;
+          right: -42px;
+          top: -54px;
+          background: rgba(74, 6, 18, 0.24);
+        }
+        .bonus-banner::after {
+          width: 132px;
+          height: 132px;
+          left: -36px;
+          bottom: -48px;
+          background: rgba(255, 255, 255, 0.14);
+        }
+        .bonus-copy {
+          position: relative;
+          z-index: 1;
+        }
+        .bonus-copy span {
+          color: #3a050f;
+          font: 900 15px/1 "Arial Black", Arial, sans-serif;
+        }
+        .bonus-copy strong {
+          display: block;
+          color: #fff7dc;
+          font: 900 62px/0.9 "Arial Black", Arial, sans-serif;
+          text-shadow: 0 5px 0 rgba(100, 16, 23, 0.86);
+          margin: 12px 0 6px;
+        }
+        .bonus-copy p {
+          color: #ffe8ac;
+          font: 900 14px/1 "Arial Black", Arial, sans-serif;
+        }
+        .bonus-copy small {
+          font-size: 10px;
+          opacity: 0.92;
+        }
+        .bonus-banner button {
+          position: relative;
+          z-index: 1;
+          width: 150px;
+          color: #fff7dc;
+          background: linear-gradient(180deg, #2b0a12, #721521);
+          border: 1px solid rgba(255, 240, 166, 0.42);
+        }
+        .promo-ledger {
+          padding: 16px 16px 12px;
+        }
+        .promo-line,
+        .profile-row {
+          min-height: 36px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          border-top: 1px solid rgba(112, 66, 30, 0.45);
+        }
+        .promo-line span,
+        .profile-row span {
+          color: #e0b39a;
+          font-size: 14px;
+          font-weight: 800;
+        }
+        .promo-line strong,
+        .profile-row strong {
+          color: #fff7dc;
+          font: 900 15px/1.1 "Arial Black", Arial, sans-serif;
+          text-align: right;
+          min-width: 0;
+          word-break: break-word;
+        }
+        .promo-line.strong strong {
+          color: #80ffd7;
+        }
+        .promo-ledger p {
+          margin-top: 10px;
+          color: #dca197;
+          font-size: 12px;
+          line-height: 1.35;
+        }
+        .profile-card {
+          padding: 16px;
+        }
+        .profile-head {
+          display: flex;
+          align-items: center;
+          gap: 14px;
+          margin-bottom: 14px;
+        }
+        .profile-avatar {
+          width: 66px;
+          height: 66px;
+          border-radius: 50%;
+          display: grid;
+          place-items: center;
+          color: #ffeb9a;
+          font: 900 32px/1 "Arial Black", Arial, sans-serif;
+          background: radial-gradient(circle at 35% 24%, #e65b6a 0, #9f1426 50%, #4a0612 100%);
+          border: 1px solid rgba(255, 229, 141, 0.75);
+        }
+        .profile-head h2 {
+          color: #fff7dc;
+          font: 900 24px/1.05 "Arial Black", Arial, sans-serif;
+          word-break: break-word;
+        }
+        .profile-head span {
+          width: max-content;
+          display: inline-block;
+          margin-top: 8px;
+          padding: 6px 9px;
+          border-radius: 7px;
+          color: #ffe58d;
+          background: #604000;
+          font: 900 11px/1 "Arial Black", Arial, sans-serif;
+          text-transform: uppercase;
+        }
+        .profile-stats,
+        .profile-actions {
+          margin-top: 2px;
+        }
+        .bottom-nav {
+          position: fixed;
+          left: 50%;
+          bottom: 0;
+          transform: translateX(-50%);
+          width: min(430px, 100vw);
+          padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 8px;
+          background: rgba(9, 7, 16, 0.98);
+          border-top: 1px solid rgba(244, 200, 74, 0.34);
+          box-shadow: 0 -12px 30px rgba(0, 0, 0, 0.35);
+        }
+        .bottom-nav button {
+          min-height: 44px;
+          border-radius: 10px;
+          color: #b69085;
+          background: transparent;
+          font-size: 12px;
+          font-weight: 900;
+        }
+        .bottom-nav span {
+          display: block;
+          margin-bottom: 3px;
+          font-size: 13px;
+        }
+        .bottom-nav .active {
+          color: #ffdf72;
+          background: rgba(36, 21, 9, 0.90);
+          border: 1px solid rgba(244, 200, 74, 0.58);
+        }
+        .modal-backdrop {
+          position: fixed;
+          inset: 0;
+          z-index: 28;
+          display: grid;
+          place-items: center;
+          padding: 18px;
+          pointer-events: auto;
+          background: rgba(0, 0, 0, 0.72);
+        }
+        .modal-card {
+          width: min(332px, calc(100vw - 36px));
+          border-radius: 14px;
+          padding: 22px 18px 18px;
+          text-align: center;
+          background: linear-gradient(180deg, #190d16, #090710);
+          border: 2px solid rgba(244, 200, 74, 0.58);
+          box-shadow: 0 24px 70px rgba(0, 0, 0, 0.48);
+        }
+        .modal-card h2 {
+          color: #ffdf72;
+          font: 900 20px/1.1 "Arial Black", Arial, sans-serif;
+        }
+        .modal-card p {
+          color: #ffc4aa;
+          font-size: 14px;
+          line-height: 1.35;
+          margin: 18px 0 14px;
+        }
+        .modal-card span {
+          display: block;
+          color: #8d6c61;
+          font: 900 12px/1 "Arial Black", Arial, sans-serif;
+          margin-bottom: 18px;
+        }
+        .modal-card button {
+          min-width: 130px;
+          color: #330009;
+          background: linear-gradient(180deg, #ffe58d, #d59d19);
+        }
+        @media (max-height: 720px) {
+          .lobby-shell {
+            gap: 9px;
+            padding-top: max(10px, env(safe-area-inset-top));
+          }
+          .wallet-card {
+            padding: 13px 14px 12px;
+          }
+          .wallet-card > strong {
+            font-size: 32px;
+            margin-bottom: 10px;
+          }
+          .promo-strip {
+            min-height: 64px;
+          }
+          .game-card {
+            grid-template-columns: 116px 1fr;
+          }
+          .game-art {
+            min-height: 118px;
+          }
+          .history-panel {
+            padding: 11px 12px;
+          }
+          .history-row {
+            min-height: 30px;
+          }
+        }
+      </style>
+    `;
+  }
+
+  _money(value) {
+    return `R$ ${Number(value || 0).toFixed(2)}`;
+  }
+
+  _escape(value) {
+    return String(value ?? '').replace(/[&<>"']/g, (char) => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#039;',
+    })[char]);
+  }
+
   _cleanup() {
     this._subs.forEach((item) => {
       if (item && item.destroy) item.destroy();
     });
     this._subs = [];
-  }
-
-  _y(base, factor, maxShift) {
-    return Math.round(base + Math.min(Math.max(0, H - 680) * factor, maxShift));
-  }
-
-  _text(x, y, text, style = {}) {
-    const fontSize = parseInt(style.fontSize || '14', 10);
-    const { minFontSize = 12, ...textStyle } = style;
-    const crispStyle = {
-      fontFamily: FONT_BODY,
-      resolution: TEXT_RESOLUTION,
-      ...textStyle,
-      fontSize: `${Math.max(fontSize, minFontSize)}px`,
-    };
-    const obj = this.add.text(x, y, text, crispStyle);
-
-    if (!style.backgroundColor && !style.shadow) {
-      const shadowBlur = fontSize >= 18 ? 3 : 1;
-      obj.setShadow(0, 1, 'rgba(0, 0, 0, 0.65)', shadowBlur);
+    if (this.root) {
+      this.root.remove();
+      this.root = null;
     }
-
-    return obj;
   }
 }
