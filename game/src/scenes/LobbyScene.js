@@ -1,6 +1,13 @@
 import Phaser from 'phaser';
 import { W, H, state } from '../config.js';
-import { clearSession, fetchLobby, getStoredUser } from '../services/api.js';
+import {
+  clearSession,
+  confirmSandboxDeposit,
+  createDepositIntent,
+  fetchLobby,
+  getStoredUser,
+  requestWithdrawal,
+} from '../services/api.js';
 
 const CLR = {
   deep: 0x080711,
@@ -26,6 +33,9 @@ export default class LobbyScene extends Phaser.Scene {
     this.snapshot = null;
     this.currentTab = data.tab || 'lobby';
     this.modal = null;
+    this.walletMessage = '';
+    this.walletBusy = false;
+    this.currentDeposit = null;
     this._subs = [];
     this.root = null;
   }
@@ -244,12 +254,57 @@ export default class LobbyScene extends Phaser.Scene {
 
   _modalHtml(type) {
     const isDeposit = type === 'deposit';
+    const title = isDeposit ? 'Depositar via Pix' : 'Sacar via Pix';
+    const message = this.walletMessage
+      ? `<span class="wallet-message">${this._escape(this.walletMessage)}</span>`
+      : '';
+    const deposit = this.currentDeposit?.intent;
+
+    if (isDeposit) {
+      return `
+        <div class="modal-backdrop" data-action="close-modal">
+          <section class="modal-card wallet-modal" role="dialog" aria-modal="true" aria-label="${title}">
+            <h2>${title}</h2>
+            <p>Escolha um valor para gerar um Pix sandbox.</p>
+            <div class="amount-grid">
+              ${[20, 50, 100, 200].map((amount) => `<button type="button" data-action="deposit-create" data-amount="${amount}">R$ ${amount}</button>`).join('')}
+            </div>
+            ${deposit ? `
+              <div class="pix-box">
+                <strong>${this._money(deposit.amount)}</strong>
+                <code>${this._escape(deposit.pix_copy_paste || '')}</code>
+              </div>
+              <button type="button" data-action="deposit-confirm" data-intent-id="${this._escape(deposit.id)}">SIMULAR PIX PAGO</button>
+            ` : ''}
+            ${message}
+            <button type="button" data-action="close-modal">FECHAR</button>
+          </section>
+        </div>
+      `;
+    }
+
     return `
       <div class="modal-backdrop" data-action="close-modal">
-        <section class="modal-card" role="dialog" aria-modal="true" aria-label="${isDeposit ? 'Depositar via Pix' : 'Sacar via Pix'}">
-          <h2>${isDeposit ? 'Depositar via Pix' : 'Sacar via Pix'}</h2>
-          <p>${isDeposit ? 'Integracao Pix entra na proxima etapa.' : 'Saque Pix sera liberado apos wallet real.'}</p>
-          <span>EM DESENVOLVIMENTO</span>
+        <section class="modal-card wallet-modal" role="dialog" aria-modal="true" aria-label="${title}">
+          <h2>${title}</h2>
+          <p>Solicite o saque para uma chave Pix. O valor fica reservado na carteira.</p>
+          <label>
+            Valor
+            <input name="withdraw-amount" inputmode="decimal" value="20" />
+          </label>
+          <label>
+            Chave Pix
+            <input name="withdraw-key" placeholder="email, telefone, CPF ou aleatoria" />
+          </label>
+          <select name="withdraw-key-type">
+            <option value="random">Aleatoria</option>
+            <option value="email">Email</option>
+            <option value="phone">Telefone</option>
+            <option value="cpf">CPF</option>
+            <option value="cnpj">CNPJ</option>
+          </select>
+          <button type="button" data-action="withdraw-submit">SOLICITAR SAQUE</button>
+          ${message}
           <button type="button" data-action="close-modal">FECHAR</button>
         </section>
       </div>
@@ -305,15 +360,28 @@ export default class LobbyScene extends Phaser.Scene {
     });
 
     this.root.querySelectorAll('[data-action]').forEach((button) => {
-      button.addEventListener('click', (event) => {
+      button.addEventListener('click', async (event) => {
         const action = button.dataset.action;
         if (action === 'close-modal') {
           event.stopPropagation();
           this.modal = null;
+          this.walletMessage = '';
+          this.currentDeposit = null;
           this._render();
         } else if (action === 'deposit' || action === 'withdraw') {
           this.modal = action;
+          this.walletMessage = '';
+          this.currentDeposit = null;
           this._render();
+        } else if (action === 'deposit-create') {
+          event.stopPropagation();
+          await this._createDeposit(Number(button.dataset.amount || 20));
+        } else if (action === 'deposit-confirm') {
+          event.stopPropagation();
+          await this._confirmDeposit(button.dataset.intentId);
+        } else if (action === 'withdraw-submit') {
+          event.stopPropagation();
+          await this._submitWithdrawal();
         } else if (action === 'refresh') {
           this._renderLoading();
           this._loadLobby();
@@ -329,6 +397,77 @@ export default class LobbyScene extends Phaser.Scene {
     const modalCard = this.root.querySelector('.modal-card');
     if (modalCard) {
       modalCard.addEventListener('click', (event) => event.stopPropagation());
+    }
+  }
+
+  async _createDeposit(amount) {
+    if (this.walletBusy) return;
+    this.walletBusy = true;
+    this.walletMessage = 'Gerando Pix...';
+    this._render();
+
+    try {
+      this.currentDeposit = await createDepositIntent(amount);
+      this.walletMessage = 'Pix sandbox criado.';
+    } catch (error) {
+      this.walletMessage = error.message || 'Falha ao gerar deposito.';
+    } finally {
+      this.walletBusy = false;
+      this._render();
+    }
+  }
+
+  async _confirmDeposit(intentId) {
+    if (this.walletBusy || !intentId) return;
+    this.walletBusy = true;
+    this.walletMessage = 'Confirmando pagamento sandbox...';
+    this._render();
+
+    try {
+      await confirmSandboxDeposit(intentId);
+      this.walletMessage = 'Deposito confirmado.';
+      await this._loadLobby();
+    } catch (error) {
+      this.walletMessage = error.message || 'Falha ao confirmar deposito.';
+      this._render();
+    } finally {
+      this.walletBusy = false;
+    }
+  }
+
+  async _submitWithdrawal() {
+    if (this.walletBusy) return;
+    const amountInput = this.root.querySelector('[name="withdraw-amount"]');
+    const keyInput = this.root.querySelector('[name="withdraw-key"]');
+    const typeInput = this.root.querySelector('[name="withdraw-key-type"]');
+    const amount = Number(String(amountInput?.value || '').replace(',', '.'));
+    const pixKey = String(keyInput?.value || '').trim();
+    const pixKeyType = String(typeInput?.value || 'random');
+
+    if (!Number.isFinite(amount) || amount < 20) {
+      this.walletMessage = 'Valor minimo para saque: R$ 20,00.';
+      this._render();
+      return;
+    }
+    if (pixKey.length < 5) {
+      this.walletMessage = 'Informe uma chave Pix valida.';
+      this._render();
+      return;
+    }
+
+    this.walletBusy = true;
+    this.walletMessage = 'Solicitando saque...';
+    this._render();
+
+    try {
+      await requestWithdrawal(amount, pixKey, pixKeyType);
+      this.walletMessage = 'Saque solicitado.';
+      await this._loadLobby();
+    } catch (error) {
+      this.walletMessage = error.message || 'Falha ao solicitar saque.';
+      this._render();
+    } finally {
+      this.walletBusy = false;
     }
   }
 
@@ -994,6 +1133,68 @@ export default class LobbyScene extends Phaser.Scene {
           color: #8d6c61;
           font: 900 12px/1 "Arial Black", Arial, sans-serif;
           margin-bottom: 18px;
+        }
+        .wallet-modal {
+          display: grid;
+          gap: 12px;
+        }
+        .wallet-modal p {
+          margin: 0;
+        }
+        .wallet-modal label {
+          display: grid;
+          gap: 6px;
+          text-align: left;
+          color: #ffdf72;
+          font-size: 12px;
+          font-weight: 900;
+        }
+        .wallet-modal input,
+        .wallet-modal select {
+          width: 100%;
+          min-height: 42px;
+          border-radius: 10px;
+          border: 1px solid rgba(244, 200, 74, 0.38);
+          background: rgba(9, 7, 16, 0.95);
+          color: #fff7dc;
+          padding: 0 12px;
+          font: 800 14px/1 Arial, sans-serif;
+          outline: none;
+        }
+        .amount-grid {
+          display: grid;
+          grid-template-columns: repeat(2, 1fr);
+          gap: 8px;
+        }
+        .amount-grid button {
+          min-height: 42px;
+          color: #330009;
+          background: linear-gradient(180deg, #ffe58d, #d59d19);
+        }
+        .pix-box {
+          padding: 12px;
+          border-radius: 10px;
+          background: rgba(23, 17, 29, 0.96);
+          border: 1px solid rgba(55, 217, 255, 0.30);
+          display: grid;
+          gap: 8px;
+        }
+        .pix-box strong {
+          color: #80ffd7;
+          font: 900 18px/1 "Arial Black", Arial, sans-serif;
+        }
+        .pix-box code {
+          display: block;
+          max-height: 70px;
+          overflow: auto;
+          color: #d7fbff;
+          font: 700 11px/1.35 Consolas, monospace;
+          word-break: break-all;
+        }
+        .wallet-message {
+          margin: 0;
+          color: #80ffd7 !important;
+          line-height: 1.25 !important;
         }
         .modal-card button {
           min-width: 130px;

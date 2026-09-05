@@ -77,3 +77,27 @@ export function register(payload) {
 export function fetchLobby() {
   return request('/api/lobby/me');
 }
+
+export function fetchWallet() {
+  return request('/api/wallet/me');
+}
+
+export function createDepositIntent(amount) {
+  return request('/api/wallet/deposit-intents', {
+    method: 'POST',
+    body: JSON.stringify({ amount }),
+  });
+}
+
+export function confirmSandboxDeposit(intentId) {
+  return request(`/api/wallet/deposit-intents/${intentId}/sandbox-confirm`, {
+    method: 'POST',
+  });
+}
+
+export function requestWithdrawal(amount, pixKey, pixKeyType = 'random') {
+  return request('/api/wallet/withdrawals', {
+    method: 'POST',
+    body: JSON.stringify({ amount, pix_key: pixKey, pix_key_type: pixKeyType }),
+  });
+}

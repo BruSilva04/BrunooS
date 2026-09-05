@@ -30,8 +30,86 @@ CREATE TABLE IF NOT EXISTS public.rounds (
 CREATE INDEX IF NOT EXISTS rounds_created_at_idx ON public.rounds (created_at DESC);
 CREATE INDEX IF NOT EXISTS rounds_user_id_idx ON public.rounds (user_id);
 
+CREATE TABLE IF NOT EXISTS public.wallet_transactions (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id text NOT NULL,
+    transaction_type text NOT NULL,
+    amount double precision NOT NULL,
+    balance_after double precision NOT NULL,
+    status text NOT NULL DEFAULT 'completed',
+    reference_type text,
+    reference_id text,
+    idempotency_key text UNIQUE,
+    metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS wallet_transactions_user_created_idx
+    ON public.wallet_transactions (user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS wallet_transactions_reference_idx
+    ON public.wallet_transactions (reference_type, reference_id);
+
+CREATE TABLE IF NOT EXISTS public.payment_intents (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id text NOT NULL,
+    provider text NOT NULL DEFAULT 'sandbox',
+    provider_payment_id text,
+    amount double precision NOT NULL,
+    status text NOT NULL DEFAULT 'pending',
+    pix_qr_code text,
+    pix_copy_paste text,
+    expires_at timestamptz,
+    metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS payment_intents_user_created_idx
+    ON public.payment_intents (user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS payment_intents_provider_payment_idx
+    ON public.payment_intents (provider, provider_payment_id);
+
+CREATE TABLE IF NOT EXISTS public.withdrawal_requests (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id text NOT NULL,
+    amount double precision NOT NULL,
+    pix_key text NOT NULL,
+    pix_key_type text NOT NULL DEFAULT 'random',
+    status text NOT NULL DEFAULT 'requested',
+    provider_transfer_id text,
+    reviewed_by text,
+    metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS withdrawal_requests_user_created_idx
+    ON public.withdrawal_requests (user_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS public.operator_settlements (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    requested_by text NOT NULL,
+    amount double precision NOT NULL,
+    status text NOT NULL DEFAULT 'requested',
+    metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+    paid_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS operator_settlements_created_idx
+    ON public.operator_settlements (created_at DESC);
+
 ALTER TABLE public.rounds ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.wallet_transactions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.payment_intents ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.withdrawal_requests ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.operator_settlements ENABLE ROW LEVEL SECURITY;
 
 GRANT ALL ON TABLE public.rounds TO service_role;
 GRANT ALL ON TABLE public.users TO service_role;
+GRANT ALL ON TABLE public.wallet_transactions TO service_role;
+GRANT ALL ON TABLE public.payment_intents TO service_role;
+GRANT ALL ON TABLE public.withdrawal_requests TO service_role;
+GRANT ALL ON TABLE public.operator_settlements TO service_role;

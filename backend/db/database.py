@@ -1,4 +1,6 @@
+import asyncio
 import os
+import uuid
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -12,6 +14,10 @@ load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 ROUNDS_TABLE = "rounds"
 USERS_TABLE = "users"
+WALLET_TRANSACTIONS_TABLE = "wallet_transactions"
+PAYMENT_INTENTS_TABLE = "payment_intents"
+WITHDRAWAL_REQUESTS_TABLE = "withdrawal_requests"
+OPERATOR_SETTLEMENTS_TABLE = "operator_settlements"
 ROUND_COLUMNS = {
     "round_id",
     "user_id",
@@ -178,10 +184,75 @@ async def get_user_by_id(user_id: str) -> dict[str, Any] | None:
     return response.data[0] if response.data else None
 
 
-async def adjust_user_balance(user_id: str, delta: float) -> tuple[bool, float]:
+async def record_wallet_transaction(
+    user_id: str,
+    amount: float,
+    balance_after: float,
+    transaction_type: str,
+    status: str = "completed",
+    reference_type: str | None = None,
+    reference_id: str | None = None,
+    idempotency_key: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    payload = {
+        "user_id": user_id,
+        "transaction_type": transaction_type,
+        "amount": round(float(amount), 2),
+        "balance_after": round(float(balance_after), 2),
+        "status": status,
+        "reference_type": reference_type,
+        "reference_id": reference_id,
+        "idempotency_key": idempotency_key,
+        "metadata": metadata or {},
+    }
+    payload = {key: value for key, value in payload.items() if value is not None}
+
+    def insert_transaction():
+        return get_supabase_client().table(WALLET_TRANSACTIONS_TABLE).insert(payload).execute()
+
+    response = await anyio.to_thread.run_sync(insert_transaction)
+    return response.data[0] if response.data else None
+
+
+async def get_wallet_transaction_by_idempotency(idempotency_key: str) -> dict[str, Any] | None:
+    def fetch_transaction():
+        return (
+            get_supabase_client()
+            .table(WALLET_TRANSACTIONS_TABLE)
+            .select("*")
+            .eq("idempotency_key", idempotency_key)
+            .limit(1)
+            .execute()
+        )
+
+    response = await anyio.to_thread.run_sync(fetch_transaction)
+    return response.data[0] if response.data else None
+
+
+async def adjust_user_balance(
+    user_id: str,
+    delta: float,
+    transaction_type: str | None = None,
+    reference_type: str | None = None,
+    reference_id: str | None = None,
+    idempotency_key: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> tuple[bool, float]:
     user = await get_user_by_id(user_id)
     if not user:
         return False, 0.0
+
+    if idempotency_key:
+        try:
+            existing_transaction = await get_wallet_transaction_by_idempotency(idempotency_key)
+        except Exception:
+            if os.getenv("REQUIRE_WALLET_LEDGER", "false").lower() == "true":
+                raise
+            existing_transaction = None
+
+        if existing_transaction:
+            return True, float(existing_transaction.get("balance_after", user.get("balance", 0)) or 0)
 
     current_balance = float(user.get("balance", 0) or 0)
     new_balance = round(current_balance + delta, 2)
@@ -198,7 +269,266 @@ async def adjust_user_balance(user_id: str, delta: float) -> tuple[bool, float]:
         )
 
     await anyio.to_thread.run_sync(update_balance)
+
+    if transaction_type and round(float(delta), 2) != 0:
+        try:
+            await record_wallet_transaction(
+                user_id=user_id,
+                amount=delta,
+                balance_after=new_balance,
+                transaction_type=transaction_type,
+                reference_type=reference_type,
+                reference_id=reference_id,
+                idempotency_key=idempotency_key,
+                metadata=metadata,
+            )
+        except Exception:
+            if os.getenv("REQUIRE_WALLET_LEDGER", "false").lower() == "true":
+                raise
+
     return True, new_balance
+
+
+async def create_payment_intent(user_id: str, amount: float, provider: str = "sandbox") -> dict[str, Any]:
+    intent_id = str(uuid.uuid4())
+    amount = round(float(amount), 2)
+    payload = {
+        "id": intent_id,
+        "user_id": user_id,
+        "provider": provider,
+        "provider_payment_id": f"sandbox_{intent_id}",
+        "amount": amount,
+        "status": "pending",
+        "pix_qr_code": f"SEREIA-SANDBOX-PIX:{intent_id}:{amount:.2f}",
+        "pix_copy_paste": f"SEREIA-SANDBOX-PIX:{intent_id}:{amount:.2f}",
+        "metadata": {"mode": "sandbox"},
+    }
+
+    def insert_intent():
+        return get_supabase_client().table(PAYMENT_INTENTS_TABLE).insert(payload).execute()
+
+    response = await anyio.to_thread.run_sync(insert_intent)
+    return response.data[0]
+
+
+async def confirm_payment_intent(intent_id: str, admin_user_id: str | None = None) -> dict[str, Any] | None:
+    intent = await get_payment_intent(intent_id)
+    if not intent:
+        return None
+    if intent.get("status") == "paid":
+        return intent
+
+    amount = float(intent.get("amount", 0) or 0)
+    user_id = intent["user_id"]
+    ok, balance = await adjust_user_balance(
+        user_id,
+        amount,
+        transaction_type="deposit",
+        reference_type="payment_intent",
+        reference_id=intent_id,
+        idempotency_key=f"deposit:{intent_id}",
+        metadata={"provider": intent.get("provider"), "confirmed_by": admin_user_id or "sandbox"},
+    )
+    if not ok:
+        return None
+
+    def update_intent():
+        return (
+            get_supabase_client()
+            .table(PAYMENT_INTENTS_TABLE)
+            .update({"status": "paid", "metadata": {**(intent.get("metadata") or {}), "balance_after": balance}})
+            .eq("id", intent_id)
+            .execute()
+        )
+
+    response = await anyio.to_thread.run_sync(update_intent)
+    return response.data[0] if response.data else None
+
+
+async def get_payment_intent(intent_id: str) -> dict[str, Any] | None:
+    def fetch_intent():
+        return (
+            get_supabase_client()
+            .table(PAYMENT_INTENTS_TABLE)
+            .select("*")
+            .eq("id", intent_id)
+            .limit(1)
+            .execute()
+        )
+
+    response = await anyio.to_thread.run_sync(fetch_intent)
+    return response.data[0] if response.data else None
+
+
+async def create_withdrawal_request(
+    user_id: str,
+    amount: float,
+    pix_key: str,
+    pix_key_type: str,
+) -> tuple[bool, dict[str, Any] | float]:
+    amount = round(float(amount), 2)
+    withdrawal_id = str(uuid.uuid4())
+    ok, balance = await adjust_user_balance(
+        user_id,
+        -amount,
+        transaction_type="withdrawal_hold",
+        reference_type="withdrawal_request",
+        reference_id=withdrawal_id,
+        idempotency_key=f"withdrawal_hold:{withdrawal_id}",
+        metadata={"pix_key_type": pix_key_type},
+    )
+    if not ok:
+        return False, balance
+
+    payload = {
+        "id": withdrawal_id,
+        "user_id": user_id,
+        "amount": amount,
+        "pix_key": pix_key,
+        "pix_key_type": pix_key_type,
+        "status": "requested",
+        "metadata": {"balance_after_hold": balance},
+    }
+
+    def insert_withdrawal():
+        return get_supabase_client().table(WITHDRAWAL_REQUESTS_TABLE).insert(payload).execute()
+
+    response = await anyio.to_thread.run_sync(insert_withdrawal)
+    return True, response.data[0]
+
+
+async def get_operator_finance_report() -> dict[str, Any]:
+    def fetch_rounds():
+        return (
+            get_supabase_client()
+            .table(ROUNDS_TABLE)
+            .select("bet,payout,status")
+            .in_("status", ["won", "lost"])
+            .limit(10000)
+            .execute()
+        )
+
+    def fetch_withdrawals():
+        return (
+            get_supabase_client()
+            .table(WITHDRAWAL_REQUESTS_TABLE)
+            .select("amount,status")
+            .in_("status", ["requested", "approved"])
+            .limit(10000)
+            .execute()
+        )
+
+    def fetch_settlements():
+        return (
+            get_supabase_client()
+            .table(OPERATOR_SETTLEMENTS_TABLE)
+            .select("amount,status")
+            .in_("status", ["requested", "paid"])
+            .limit(10000)
+            .execute()
+        )
+
+    rounds, withdrawals, settlements = await asyncio.gather(
+        anyio.to_thread.run_sync(fetch_rounds),
+        anyio.to_thread.run_sync(fetch_withdrawals),
+        anyio.to_thread.run_sync(fetch_settlements),
+    )
+
+    round_rows = rounds.data or []
+    withdrawal_rows = withdrawals.data or []
+    settlement_rows = settlements.data or []
+    total_bets = round(sum(float(row.get("bet", 0) or 0) for row in round_rows), 2)
+    total_payouts = round(sum(float(row.get("payout", 0) or 0) for row in round_rows), 2)
+    gross_gaming_revenue = round(total_bets - total_payouts, 2)
+    pending_withdrawals = round(sum(float(row.get("amount", 0) or 0) for row in withdrawal_rows), 2)
+    reserved_settlements = round(sum(float(row.get("amount", 0) or 0) for row in settlement_rows), 2)
+    available_for_settlement = round(
+        max(0.0, gross_gaming_revenue - pending_withdrawals - reserved_settlements),
+        2,
+    )
+
+    return {
+        "rounds": len(round_rows),
+        "total_bets": total_bets,
+        "total_payouts": total_payouts,
+        "gross_gaming_revenue": gross_gaming_revenue,
+        "pending_withdrawals": pending_withdrawals,
+        "reserved_settlements": reserved_settlements,
+        "available_for_settlement": available_for_settlement,
+    }
+
+
+async def create_operator_settlement(requested_by: str, amount: float) -> tuple[bool, dict[str, Any] | float]:
+    report = await get_operator_finance_report()
+    amount = round(float(amount), 2)
+    available = float(report["available_for_settlement"])
+    if amount > available:
+        return False, available
+
+    payload = {
+        "requested_by": requested_by,
+        "amount": amount,
+        "status": "requested",
+        "metadata": {"report_snapshot": report},
+    }
+
+    def insert_settlement():
+        return get_supabase_client().table(OPERATOR_SETTLEMENTS_TABLE).insert(payload).execute()
+
+    response = await anyio.to_thread.run_sync(insert_settlement)
+    return True, response.data[0]
+
+
+async def list_wallet_snapshot(user_id: str) -> dict[str, Any] | None:
+    user = await get_user_by_id(user_id)
+    if not user:
+        return None
+
+    def fetch_transactions():
+        return (
+            get_supabase_client()
+            .table(WALLET_TRANSACTIONS_TABLE)
+            .select("*")
+            .eq("user_id", user_id)
+            .order("created_at", desc=True)
+            .limit(30)
+            .execute()
+        )
+
+    def fetch_deposits():
+        return (
+            get_supabase_client()
+            .table(PAYMENT_INTENTS_TABLE)
+            .select("*")
+            .eq("user_id", user_id)
+            .order("created_at", desc=True)
+            .limit(10)
+            .execute()
+        )
+
+    def fetch_withdrawals():
+        return (
+            get_supabase_client()
+            .table(WITHDRAWAL_REQUESTS_TABLE)
+            .select("*")
+            .eq("user_id", user_id)
+            .order("created_at", desc=True)
+            .limit(10)
+            .execute()
+        )
+
+    transactions, deposits, withdrawals = await asyncio.gather(
+        anyio.to_thread.run_sync(fetch_transactions),
+        anyio.to_thread.run_sync(fetch_deposits),
+        anyio.to_thread.run_sync(fetch_withdrawals),
+    )
+
+    return {
+        "balance": float(user.get("balance", 0) or 0),
+        "transactions": transactions.data or [],
+        "deposits": deposits.data or [],
+        "withdrawals": withdrawals.data or [],
+    }
 
 
 def _round_multiplier(round_data: dict[str, Any]) -> float:

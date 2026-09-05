@@ -94,7 +94,15 @@ async def game_websocket(websocket: WebSocket):
                     })
                     continue
 
-                charged, balance = await adjust_user_balance(user["id"], -bet)
+                round_id = str(uuid.uuid4())
+                charged, balance = await adjust_user_balance(
+                    user["id"],
+                    -bet,
+                    transaction_type="bet",
+                    reference_type="round",
+                    reference_id=round_id,
+                    idempotency_key=f"bet:{round_id}",
+                )
                 if not charged:
                     await websocket.send_json({
                         "type": "error",
@@ -102,7 +110,6 @@ async def game_websocket(websocket: WebSocket):
                     })
                     continue
 
-                round_id = str(uuid.uuid4())
                 server_seed = generate_server_seed()
                 seed_hash = hash_seed(server_seed)
                 crash_point = generate_crash_point(server_seed, round_id)
@@ -160,7 +167,15 @@ async def game_websocket(websocket: WebSocket):
                 
                 if success:
                     active_round["status"] = "won"
-                    _, balance = await adjust_user_balance(active_round["user_id"], payout)
+                    _, balance = await adjust_user_balance(
+                        active_round["user_id"],
+                        payout,
+                        transaction_type="payout",
+                        reference_type="round",
+                        reference_id=active_round["round_id"],
+                        idempotency_key=f"payout:{active_round['round_id']}",
+                        metadata={"cash_out_at": server_mult},
+                    )
                     await update_round(active_round["round_id"],
                         cash_out_at=server_mult, payout=payout, status="won")
                     
