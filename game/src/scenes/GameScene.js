@@ -25,6 +25,8 @@ export default class GameScene extends Phaser.Scene {
     this.ws     = null;
     this.roundId = null;
     this.resultShown = false;
+    this.betDebitedByServer = false;
+    this.lossReason = 'crash';
   }
 
   create() {
@@ -68,17 +70,19 @@ export default class GameScene extends Phaser.Scene {
         const data = JSON.parse(event.data);
         if (data.type === 'round_started') {
           this.roundId = data.round_id;
+          this.betDebitedByServer = true;
+          if (Number.isFinite(data.balance)) state.balance = data.balance;
         } else if (data.type === 'cash_out_result') {
           if (data.success) {
-            this._applyCashOutResult(data.payout, data.multiplier);
+            this._applyCashOutResult(data.payout, data.multiplier, data.balance);
           } else {
-            this._applyLossResult(data.multiplier);
+            this._applyLossResult(data.multiplier, 'crash');
           }
         } else if (data.type === 'round_crashed') {
           this._serverCrash(data.multiplier);
         } else if (data.type === 'death_registered') {
           console.log('Crash point was: ' + data.crash_point + 'x');
-          this._applyLossResult(this.mult);
+          this._applyLossResult(this.mult, this.lossReason);
         } else if (data.type === 'error') {
           this._handleServerError(data.message);
         }
@@ -162,21 +166,16 @@ export default class GameScene extends Phaser.Scene {
     this.sounds.playCashout();
     this.particles.emitCashoutShower();
 
-    const won = +(this.bet * this.mult).toFixed(2);
-
     if (this.ws && this.ws.readyState === WebSocket.OPEN && this.roundId) {
       this.ws.send(JSON.stringify({ action: 'cash_out', round_id: this.roundId, client_mult: this.mult }));
-    } else if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-      state.balance += (won - this.bet);
-      addHistory(this.mult);
-      this._showResult(true, won);
     } else {
-      this._handleServerError('Rodada nao autorizada');
+      this._handleServerError('Rodada sem confirmacao do servidor');
     }
   }
 
-  _die() {
+  _die(reason = 'obstacle') {
     if (this.dead || this.cashed) return;
+    this.lossReason = reason;
     this.dead = true;
     this.sounds.playCrash();
     this.cameras.main.shake(280, 0.012);
@@ -185,10 +184,10 @@ export default class GameScene extends Phaser.Scene {
     if (this.ws && this.ws.readyState === WebSocket.OPEN && this.roundId) {
       this.ws.send(JSON.stringify({ action: 'death', round_id: this.roundId, client_mult: this.mult }));
       this.time.delayedCall(900, () => {
-        if (!this.resultShown) this._applyLossResult(this.mult);
+        if (!this.resultShown) this._applyLossResult(this.mult, this.lossReason);
       });
     } else {
-      this._applyLossResult(this.mult);
+      this._applyLossResult(this.mult, this.lossReason);
     }
   }
 
@@ -199,7 +198,7 @@ export default class GameScene extends Phaser.Scene {
     this.sounds.playCrash();
     this.cameras.main.shake(280, 0.012);
     this._stopTimers();
-    this._applyLossResult(this.mult);
+    this._applyLossResult(this.mult, 'crash');
   }
 
   _handleServerError(message) {
@@ -218,25 +217,33 @@ export default class GameScene extends Phaser.Scene {
     }
 
     if ((this.dead || this.cashed) && !this.resultShown) {
-      this._applyLossResult(this.mult);
+      this._applyLossResult(this.mult, 'connection');
     }
   }
 
-  _applyCashOutResult(payout, multiplier = this.mult) {
+  _applyCashOutResult(payout, multiplier = this.mult, balance = null) {
     if (this.resultShown) return;
     if (Number.isFinite(multiplier)) this.mult = multiplier;
     const amount = Number.isFinite(payout) ? payout : +(this.bet * this.mult).toFixed(2);
-    state.balance += (amount - this.bet);
+    if (Number.isFinite(balance)) {
+      state.balance = balance;
+    } else if (this.betDebitedByServer) {
+      state.balance += amount;
+    } else {
+      state.balance += (amount - this.bet);
+    }
     addHistory(this.mult);
-    this._showResult(true, amount);
+    this._showResult(true, amount, 'cashout');
   }
 
-  _applyLossResult(multiplier = this.mult) {
+  _applyLossResult(multiplier = this.mult, reason = 'crash') {
     if (this.resultShown) return;
     if (Number.isFinite(multiplier)) this.mult = multiplier;
-    state.balance = Math.max(0, state.balance - this.bet);
+    if (!this.betDebitedByServer) {
+      state.balance = Math.max(0, state.balance - this.bet);
+    }
     addHistory(this.mult);
-    this._showResult(false, 0);
+    this._showResult(false, 0, reason);
   }
 
   _stopTimers() {
@@ -244,10 +251,10 @@ export default class GameScene extends Phaser.Scene {
  if (t) t.destroy(); });
   }
 
-  _showResult(won, amount) {
+  _showResult(won, amount, reason = 'crash') {
     if (this.resultShown) return;
     this.resultShown = true;
-    this.hud.showResult(won, amount, this.mult, this.bet);
+    this.hud.showResult(won, amount, this.mult, this.bet, reason);
     this.time.delayedCall(500, () => {
       this.input.once('pointerdown', () => this.scene.start('Lobby', { balance: state.balance }));
     });
@@ -268,14 +275,14 @@ export default class GameScene extends Phaser.Scene {
     this.merm.update(dt);
     this.particles.emitBubbleTrail(this.merm.x, this.merm.y);
 
-    if (this.merm.isOutOfBounds()) { this._die(); return; }
+    if (this.merm.isOutOfBounds()) { this._die('boundary'); return; }
 
     for (let i = this._obs.length - 1; i >= 0; i--) {
       const o = this._obs[i];
       o.update(this.speed, dt);
 
       if (o.checkCollision(this.merm.x, this.merm.y, this.merm.hitRadius)) {
-        this._die(); return;
+        this._die('obstacle'); return;
       }
 
       if (o.isOffScreen()) {

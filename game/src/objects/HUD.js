@@ -145,14 +145,31 @@ export default class HUD {
     }
   }
 
-  showResult(won, amount, mult, bet) {
+  _resultCopy(won, reason) {
+    if (won) {
+      return { icon: 'OK', title: 'RESGATE FEITO', detail: 'Premio confirmado pelo servidor' };
+    }
+    if (reason === 'obstacle') {
+      return { icon: 'X', title: 'A SEREIA BATEU', detail: 'Obstaculo atingido' };
+    }
+    if (reason === 'boundary') {
+      return { icon: '!', title: 'FORA DA ROTA', detail: 'Volte para a corrente segura' };
+    }
+    if (reason === 'connection') {
+      return { icon: '!', title: 'CONEXAO PERDIDA', detail: 'Resultado protegido pelo servidor' };
+    }
+    return { icon: '!', title: 'A MARE VIROU', detail: 'Crash da rodada' };
+  }
+
+  showResult(won, amount, mult, bet, reason = 'crash') {
     this.hideCashOut();
+    const result = this._resultCopy(won, reason);
 
     const overlay = this.scene.add.rectangle(0, 0, W, H, 0x000000, 0.42).setOrigin(0);
     const px = 30;
-    const py = H / 2 - 116;
+    const py = H / 2 - 122;
     const pw = W - 60;
-    const ph = 232;
+    const ph = 244;
 
     const panel = this.scene.add.graphics();
     panel.fillStyle(won ? 0x03251c : 0x27070b, 0.96);
@@ -165,8 +182,11 @@ export default class HUD {
     const main = won ? `R$ ${amount.toFixed(2)}` : `- R$ ${bet.toFixed(2)}`;
     const color = won ? '#5dffd0' : '#ff7d87';
 
-    this.scene.add.text(W / 2, py + 36, icon, { fontSize: '34px' }).setOrigin(0.5);
-    this.scene.add.text(W / 2, py + 78, title, {
+    this.scene.add.text(W / 2, py + 36, result.icon, {
+      fontSize: '28px',
+      fontFamily: '"Arial Black", Arial, sans-serif'
+    }).setOrigin(0.5);
+    this.scene.add.text(W / 2, py + 78, result.title, {
       fontSize: '20px',
       fontFamily: '"Arial Black", Arial, sans-serif',
       color: won ? '#ffe08a' : '#ff9da5'
@@ -181,7 +201,12 @@ export default class HUD {
       fontFamily: '"Arial Black", Arial, sans-serif',
       color: '#ffffff'
     }).setOrigin(0.5);
-    this.scene.add.text(W / 2, py + 202, 'TOQUE PARA JOGAR', {
+    this.scene.add.text(W / 2, py + 190, result.detail, {
+      fontSize: '11px',
+      fontFamily: '"Arial Black", Arial, sans-serif',
+      color: won ? '#8fffe7' : '#ffc0c7'
+    }).setOrigin(0.5);
+    this.scene.add.text(W / 2, py + 216, 'TOQUE PARA JOGAR', {
       fontSize: '12px',
       fontFamily: '"Arial Black", Arial, sans-serif',
       color: '#8eb8c7'
