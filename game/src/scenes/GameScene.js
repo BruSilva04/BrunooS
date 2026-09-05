@@ -274,7 +274,7 @@ export default class GameScene extends Phaser.Scene {
       const o = this._obs[i];
       o.update(this.speed, dt);
 
-      if (o.checkCollision(this.merm.x, this.merm.y)) {
+      if (o.checkCollision(this.merm.x, this.merm.y, this.merm.hitRadius)) {
         this._die(); return;
       }
 

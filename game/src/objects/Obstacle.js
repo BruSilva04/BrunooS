@@ -5,7 +5,9 @@ export default class Obstacle {
   constructor(scene, gapY) {
     this.scene = scene;
     this.x = W + 34;
-    this.GAP = 144;
+    this.GAP = 170;
+    this.WIDTH = 52;
+    this.COLLISION_HALF_WIDTH = 18;
     this.gapY = gapY;
     this.kind = Phaser.Utils.Array.GetRandom([
       { icon: '🦈', color: 0xff6675 },
@@ -22,21 +24,21 @@ export default class Obstacle {
   }
 
   _paint() {
-    const width = 56;
+    const width = this.WIDTH;
     const topH = Math.max(92, this.gapY - this.GAP / 2);
     const botY = this.gapY + this.GAP / 2;
     const bottomH = Math.max(0, H - 104 - botY);
 
     this.topZone.clear();
-    this.topZone.fillStyle(this.kind.color, 0.09);
+    this.topZone.fillStyle(this.kind.color, 0.15);
     this.topZone.fillRoundedRect(this.x - width / 2, 92, width, Math.max(0, topH - 92), 8);
-    this.topZone.lineStyle(1, this.kind.color, 0.28);
+    this.topZone.lineStyle(2, this.kind.color, 0.38);
     this.topZone.strokeRoundedRect(this.x - width / 2, 92, width, Math.max(0, topH - 92), 8);
 
     this.bottomZone.clear();
-    this.bottomZone.fillStyle(this.kind.color, 0.09);
+    this.bottomZone.fillStyle(this.kind.color, 0.15);
     this.bottomZone.fillRoundedRect(this.x - width / 2, botY, width, bottomH, 8);
-    this.bottomZone.lineStyle(1, this.kind.color, 0.28);
+    this.bottomZone.lineStyle(2, this.kind.color, 0.38);
     this.bottomZone.strokeRoundedRect(this.x - width / 2, botY, width, bottomH, 8);
   }
 
@@ -49,12 +51,13 @@ export default class Obstacle {
     this._paint();
   }
 
-  checkCollision(mermaidX, mermaidY) {
-    if (Math.abs(this.x - mermaidX) < 28) {
-      const inGap = mermaidY > this.gapY - this.GAP / 2 && mermaidY < this.gapY + this.GAP / 2;
-      return !inGap;
-    }
-    return false;
+  checkCollision(mermaidX, mermaidY, hitRadius = 10) {
+    const horizontalOverlap = Math.abs(this.x - mermaidX) < this.COLLISION_HALF_WIDTH + hitRadius;
+    if (!horizontalOverlap) return false;
+
+    const topEdge = this.gapY - this.GAP / 2;
+    const bottomEdge = this.gapY + this.GAP / 2;
+    return mermaidY - hitRadius < topEdge || mermaidY + hitRadius > bottomEdge;
   }
 
   isOffScreen() {

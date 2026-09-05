@@ -7,6 +7,7 @@ export default class Mermaid {
     this.trail = [];
     this.glow = scene.add.circle(75, H / 2, 30, 0x6fffe9, 0.16);
     this.sprite = scene.add.text(75, H / 2, '🧜‍♀️', { fontSize: '42px' }).setOrigin(0.5);
+    this.hitRadius = 10;
     this.vy = 0;
   }
 
