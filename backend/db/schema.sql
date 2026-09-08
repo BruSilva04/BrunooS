@@ -3,16 +3,31 @@ CREATE TABLE IF NOT EXISTS public.users (
     phone text NOT NULL,
     email text NOT NULL UNIQUE,
     username text NOT NULL UNIQUE,
+    legal_name text,
+    document text,
+    document_type text NOT NULL DEFAULT 'cpf',
     password_hash text NOT NULL,
     role text NOT NULL DEFAULT 'player',
     permissions jsonb NOT NULL DEFAULT '{"play": true, "admin": false}'::jsonb,
-    balance double precision NOT NULL DEFAULT 250,
+    balance double precision NOT NULL DEFAULT 0,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now()
 );
 
 CREATE INDEX IF NOT EXISTS users_username_idx ON public.users (username);
 CREATE INDEX IF NOT EXISTS users_email_idx ON public.users (email);
+
+ALTER TABLE public.users
+    ADD COLUMN IF NOT EXISTS legal_name text,
+    ADD COLUMN IF NOT EXISTS document text,
+    ADD COLUMN IF NOT EXISTS document_type text NOT NULL DEFAULT 'cpf';
+
+ALTER TABLE public.users
+    ALTER COLUMN balance SET DEFAULT 0;
+
+CREATE UNIQUE INDEX IF NOT EXISTS users_document_idx
+    ON public.users (document)
+    WHERE document IS NOT NULL AND document <> '';
 
 CREATE TABLE IF NOT EXISTS public.rounds (
     round_id text PRIMARY KEY,
@@ -135,3 +150,12 @@ GRANT ALL ON TABLE public.wallet_transactions TO service_role;
 GRANT ALL ON TABLE public.payment_intents TO service_role;
 GRANT ALL ON TABLE public.withdrawal_requests TO service_role;
 GRANT ALL ON TABLE public.operator_settlements TO service_role;
+
+UPDATE public.users AS u
+SET balance = GREATEST(0, COALESCE((
+    SELECT round(sum(wt.amount)::numeric, 2)::double precision
+    FROM public.wallet_transactions AS wt
+    WHERE wt.user_id = u.id::text
+      AND wt.status = 'completed'
+), 0))
+WHERE COALESCE(u.role, 'player') <> 'admin';

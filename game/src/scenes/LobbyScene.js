@@ -224,6 +224,8 @@ export default class LobbyScene extends Phaser.Scene {
         </div>
         ${this._profileRowHtml('Email', user.email || '-')}
         ${this._profileRowHtml('Telefone', user.phone || '-')}
+        ${this._profileRowHtml('Nome', user.legal_name || '-')}
+        ${this._profileRowHtml('CPF/CNPJ', user.document_masked || '-')}
       </section>
 
       <section class="stats-grid profile-stats">
@@ -259,13 +261,25 @@ export default class LobbyScene extends Phaser.Scene {
       ? `<span class="wallet-message">${this._escape(this.walletMessage)}</span>`
       : '';
     const deposit = this.currentDeposit?.intent;
+    const user = this.snapshot?.user || this.user || {};
+    const needsCustomer = isDeposit && !user.has_kyc;
 
     if (isDeposit) {
       return `
         <div class="modal-backdrop" data-action="close-modal">
           <section class="modal-card wallet-modal" role="dialog" aria-modal="true" aria-label="${title}">
             <h2>${title}</h2>
-            <p>Escolha um valor para gerar um Pix sandbox.</p>
+            <p>Escolha um valor para gerar um Pix. O saldo entra somente apos confirmacao do pagamento.</p>
+            ${needsCustomer ? `
+              <label>
+                Nome completo
+                <input name="deposit-customer-name" autocomplete="name" placeholder="Nome do titular" />
+              </label>
+              <label>
+                CPF
+                <input name="deposit-customer-document" inputmode="numeric" placeholder="00000000000" />
+              </label>
+            ` : ''}
             <div class="amount-grid">
               ${[20, 50, 100, 200].map((amount) => `<button type="button" data-action="deposit-create" data-amount="${amount}">R$ ${amount}</button>`).join('')}
             </div>
@@ -274,7 +288,7 @@ export default class LobbyScene extends Phaser.Scene {
                 <strong>${this._money(deposit.amount)}</strong>
                 <code>${this._escape(deposit.pix_copy_paste || '')}</code>
               </div>
-              <button type="button" data-action="deposit-confirm" data-intent-id="${this._escape(deposit.id)}">SIMULAR PIX PAGO</button>
+              ${this.currentDeposit?.sandbox ? `<button type="button" data-action="deposit-confirm" data-intent-id="${this._escape(deposit.id)}">SIMULAR PIX PAGO</button>` : ''}
             ` : ''}
             ${message}
             <button type="button" data-action="close-modal">FECHAR</button>
@@ -414,13 +428,24 @@ export default class LobbyScene extends Phaser.Scene {
 
   async _createDeposit(amount) {
     if (this.walletBusy) return;
+    const nameInput = this.root.querySelector('[name="deposit-customer-name"]');
+    const documentInput = this.root.querySelector('[name="deposit-customer-document"]');
+    const customerName = String(nameInput?.value || '').trim();
+    const customerDocument = String(documentInput?.value || '').replace(/\D/g, '').trim();
+
+    if ((nameInput || documentInput) && (customerName.length < 3 || customerDocument.length !== 11)) {
+      this.walletMessage = 'Informe nome completo e CPF para gerar Pix.';
+      this._render();
+      return;
+    }
+
     this.walletBusy = true;
     this.walletMessage = 'Gerando Pix...';
     this._render();
 
     try {
-      this.currentDeposit = await createDepositIntent(amount);
-      this.walletMessage = 'Pix sandbox criado.';
+      this.currentDeposit = await createDepositIntent(amount, customerName, customerDocument, 'cpf');
+      this.walletMessage = this.currentDeposit?.sandbox ? 'Pix sandbox criado.' : 'Pix real criado. Aguardando pagamento.';
     } catch (error) {
       this.walletMessage = error.message || 'Falha ao gerar deposito.';
     } finally {

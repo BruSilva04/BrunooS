@@ -50,7 +50,7 @@ export const WS_URL = normalizeEnvUrl(
 
 // Global Wallet & iGaming History State
 export const state = {
-  balance: 250.00,
+  balance: 0.00,
   history: []
 };
 

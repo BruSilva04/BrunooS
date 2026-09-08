@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 from db.database import (
     create_user,
     get_lobby_snapshot,
+    get_user_by_document,
     get_user_by_email,
     get_user_by_id,
     get_user_by_username,
@@ -17,6 +18,9 @@ class RegisterRequest(BaseModel):
     phone: str = Field(min_length=8, max_length=24)
     email: str = Field(min_length=5, max_length=120, pattern=r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
     username: str = Field(min_length=3, max_length=24, pattern=r"^[a-zA-Z0-9_.-]+$")
+    legal_name: str = Field(min_length=3, max_length=120)
+    document: str = Field(min_length=11, max_length=18)
+    document_type: str = Field(default="cpf", pattern=r"^(cpf|cnpj)$")
     password: str = Field(min_length=6, max_length=128)
 
 
@@ -35,11 +39,22 @@ def bearer_token(authorization: str | None) -> str | None:
 
 
 def public_user(user: dict) -> dict:
+    document = "".join(char for char in str(user.get("document") or "") if char.isdigit())
+    document_masked = ""
+    if len(document) == 11:
+        document_masked = f"{document[:3]}.***.***-{document[-2:]}"
+    elif len(document) == 14:
+        document_masked = f"{document[:2]}.***.***/****-{document[-2:]}"
+
     return {
         "id": user["id"],
         "username": user["username"],
         "email": user["email"],
         "phone": user.get("phone", ""),
+        "legal_name": user.get("legal_name") or "",
+        "document_masked": document_masked,
+        "document_type": user.get("document_type") or "cpf",
+        "has_kyc": bool(user.get("legal_name") and user.get("document")),
         "role": user.get("role", "player"),
         "permissions": user.get("permissions", {}),
         "balance": float(user.get("balance", 0) or 0),
@@ -52,6 +67,8 @@ def db_unavailable(exc: Exception) -> HTTPException:
         detail = "Supabase nao configurado no Render. Cadastre SUPABASE_URL e SUPABASE_SECRET_KEY nas Environment Variables do backend."
     elif "public.users" in error_text or "PGRST205" in error_text:
         detail = "Tabela public.users nao existe no Supabase. Aplique backend/db/schema.sql no SQL Editor."
+    elif "legal_name" in error_text or "document" in error_text:
+        detail = "Schema de usuarios desatualizado. Rode novamente backend/db/schema.sql no SQL Editor do Supabase."
     else:
         detail = "Banco Supabase indisponivel. Verifique SUPABASE_URL, SUPABASE_SECRET_KEY e permissoes do projeto."
 
@@ -65,21 +82,32 @@ def db_unavailable(exc: Exception) -> HTTPException:
 async def register(payload: RegisterRequest):
     username = payload.username.strip()
     email = payload.email.lower().strip()
+    legal_name = payload.legal_name.strip()
+    document = "".join(char for char in payload.document if char.isdigit())
+    if payload.document_type == "cpf" and len(document) != 11:
+        raise HTTPException(status_code=422, detail="CPF precisa ter 11 digitos")
+    if payload.document_type == "cnpj" and len(document) != 14:
+        raise HTTPException(status_code=422, detail="CNPJ precisa ter 14 digitos")
 
     try:
         if await get_user_by_username(username):
             raise HTTPException(status_code=409, detail="Usuario ja existe")
         if await get_user_by_email(email):
             raise HTTPException(status_code=409, detail="Email ja cadastrado")
+        if await get_user_by_document(document):
+            raise HTTPException(status_code=409, detail="Documento ja cadastrado")
 
         user = await create_user({
             "phone": payload.phone.strip(),
             "email": email,
             "username": username,
+            "legal_name": legal_name,
+            "document": document,
+            "document_type": payload.document_type,
             "password_hash": hash_password(payload.password),
             "role": "player",
             "permissions": {"play": True, "admin": False},
-            "balance": 250.0,
+            "balance": 0.0,
         })
     except HTTPException:
         raise

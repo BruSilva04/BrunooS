@@ -168,12 +168,20 @@ export default class AuthScene extends Phaser.Scene {
         </div>
         ${isLogin ? '' : `
           <div class="sereia-field">
+            <label>Nome completo</label>
+            <input name="legal_name" autocomplete="name" placeholder="Seu nome completo" minlength="3" maxlength="120" required />
+          </div>
+          <div class="sereia-field">
             <label>Telefone celular</label>
             <input name="phone" autocomplete="tel" inputmode="tel" placeholder="11999999999" minlength="8" maxlength="24" required />
           </div>
           <div class="sereia-field">
             <label>Email</label>
             <input name="email" autocomplete="email" inputmode="email" placeholder="voce@email.com" maxlength="120" required />
+          </div>
+          <div class="sereia-field">
+            <label>CPF</label>
+            <input name="document" autocomplete="off" inputmode="numeric" placeholder="00000000000" minlength="11" maxlength="18" required />
           </div>
         `}
         <div class="sereia-field">
@@ -209,13 +217,19 @@ export default class AuthScene extends Phaser.Scene {
     const password = String(values.password || '');
     const phone = String(values.phone || '').replace(/[^\d+]/g, '').trim();
     const email = String(values.email || '').trim().toLowerCase();
+    const legalName = String(values.legal_name || '').trim();
+    const document = String(values.document || '').replace(/\D/g, '').trim();
 
-    if (!username || !password || (this.mode !== 'login' && (!phone || !email))) {
+    if (!username || !password || (this.mode !== 'login' && (!phone || !email || !legalName || !document))) {
       this._renderAuthPanel('Preencha todos os campos.');
       return;
     }
 
     if (this.mode === 'register') {
+      if (legalName.length < 3) {
+        this._renderAuthPanel('Informe seu nome completo.');
+        return;
+      }
       if (phone.length < 8) {
         this._renderAuthPanel('Informe um telefone celular valido.');
         return;
@@ -226,6 +240,10 @@ export default class AuthScene extends Phaser.Scene {
       }
       if (password.length < 6) {
         this._renderAuthPanel('A senha precisa ter pelo menos 6 caracteres.');
+        return;
+      }
+      if (document.length !== 11) {
+        this._renderAuthPanel('Informe um CPF valido com 11 digitos.');
         return;
       }
     }
@@ -239,6 +257,9 @@ export default class AuthScene extends Phaser.Scene {
           phone,
           email,
           username,
+          legal_name: legalName,
+          document,
+          document_type: 'cpf',
           password,
         });
 

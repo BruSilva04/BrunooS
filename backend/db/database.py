@@ -34,6 +34,9 @@ USER_COLUMNS = {
     "phone",
     "email",
     "username",
+    "legal_name",
+    "document",
+    "document_type",
     "password_hash",
     "role",
     "permissions",
@@ -169,6 +172,21 @@ async def get_user_by_email(email: str) -> dict[str, Any] | None:
     return response.data[0] if response.data else None
 
 
+async def get_user_by_document(document: str) -> dict[str, Any] | None:
+    def fetch_user():
+        return (
+            get_supabase_client()
+            .table(USERS_TABLE)
+            .select("*")
+            .eq("document", document)
+            .limit(1)
+            .execute()
+        )
+
+    response = await anyio.to_thread.run_sync(fetch_user)
+    return response.data[0] if response.data else None
+
+
 async def get_user_by_id(user_id: str) -> dict[str, Any] | None:
     def fetch_user():
         return (
@@ -181,6 +199,25 @@ async def get_user_by_id(user_id: str) -> dict[str, Any] | None:
         )
 
     response = await anyio.to_thread.run_sync(fetch_user)
+    return response.data[0] if response.data else None
+
+
+async def update_user_profile(user_id: str, **kwargs: Any) -> dict[str, Any] | None:
+    allowed = {"legal_name", "document", "document_type", "phone", "email"}
+    updates = {key: value for key, value in kwargs.items() if key in allowed and value is not None}
+    if not updates:
+        return await get_user_by_id(user_id)
+
+    def update_user():
+        return (
+            get_supabase_client()
+            .table(USERS_TABLE)
+            .update(updates)
+            .eq("id", user_id)
+            .execute()
+        )
+
+    response = await anyio.to_thread.run_sync(update_user)
     return response.data[0] if response.data else None
 
 
@@ -731,6 +768,10 @@ async def get_lobby_snapshot(user_id: str) -> dict[str, Any] | None:
             "username": user["username"],
             "email": user["email"],
             "phone": user.get("phone", ""),
+            "legal_name": user.get("legal_name") or "",
+            "document_masked": mask_document(user.get("document")),
+            "document_type": user.get("document_type") or "cpf",
+            "has_kyc": bool(user.get("legal_name") and user.get("document")),
             "role": user.get("role", "player"),
             "permissions": user.get("permissions", {}),
         },
@@ -778,3 +819,14 @@ async def get_round(round_id: str) -> dict[str, Any] | None:
 
     response = await anyio.to_thread.run_sync(fetch_round)
     return response.data[0] if response.data else None
+
+
+def mask_document(document: str | None) -> str:
+    digits = "".join(char for char in str(document or "") if char.isdigit())
+    if len(digits) == 11:
+        return f"{digits[:3]}.***.***-{digits[-2:]}"
+    if len(digits) == 14:
+        return f"{digits[:2]}.***.***/****-{digits[-2:]}"
+    if len(digits) > 4:
+        return f"{digits[:2]}***{digits[-2:]}"
+    return ""

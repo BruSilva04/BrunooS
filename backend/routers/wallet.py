@@ -17,6 +17,7 @@ from db.database import (
     get_withdrawal_request,
     get_withdrawal_by_provider_transfer_id,
     list_wallet_snapshot,
+    update_user_profile,
     update_operator_settlement,
     update_payment_intent,
     update_withdrawal_request,
@@ -29,6 +30,9 @@ router = APIRouter(prefix="/api/wallet", tags=["wallet"])
 
 class DepositIntentRequest(BaseModel):
     amount: float = Field(ge=20, le=5000)
+    customer_name: str | None = Field(default=None, min_length=3, max_length=120)
+    customer_document: str | None = Field(default=None, min_length=11, max_length=18)
+    customer_document_type: str | None = Field(default="cpf", pattern=r"^(cpf|cnpj)$")
 
 
 class WithdrawRequest(BaseModel):
@@ -89,6 +93,42 @@ def callback_url(path: str) -> str:
     return f"{base_url}{path}"
 
 
+def only_digits(value: str | None) -> str:
+    return "".join(char for char in str(value or "") if char.isdigit())
+
+
+async def deposit_customer(user: dict, payload: DepositIntentRequest) -> dict:
+    legal_name = (user.get("legal_name") or payload.customer_name or "").strip()
+    document = only_digits(user.get("document") or payload.customer_document)
+    document_type = (user.get("document_type") or payload.customer_document_type or "cpf").strip().lower()
+
+    if len(legal_name) < 3 or len(document) < 11:
+        raise HTTPException(
+            status_code=422,
+            detail="Informe nome completo e CPF/CNPJ para gerar Pix real.",
+        )
+    if document_type == "cpf" and len(document) != 11:
+        raise HTTPException(status_code=422, detail="CPF precisa ter 11 digitos")
+    if document_type == "cnpj" and len(document) != 14:
+        raise HTTPException(status_code=422, detail="CNPJ precisa ter 14 digitos")
+
+    if not user.get("legal_name") or not user.get("document"):
+        user = await update_user_profile(
+            user["id"],
+            legal_name=legal_name,
+            document=document,
+            document_type=document_type,
+        ) or user
+
+    return {
+        "name": legal_name,
+        "email": user["email"],
+        "phone": user.get("phone", ""),
+        "document": document,
+        "document_type": document_type,
+    }
+
+
 @router.get("/me")
 async def wallet_me(authorization: str | None = Header(default=None)):
     user = await current_user(authorization)
@@ -108,13 +148,18 @@ async def deposit_intent(
     if provider not in {"sandbox", "amplopay"}:
         raise HTTPException(status_code=501, detail=f"Provider {provider} nao suportado")
 
+    customer = None
+    if provider == "amplopay":
+        customer = await deposit_customer(user, payload)
+
     intent = await create_payment_intent(user["id"], payload.amount, provider)
 
     if provider == "amplopay":
         try:
-            gateway_response = await amplopay.create_pix_deposit(
+            gateway_response = await amplopay.create_pix_receive(
                 amount=payload.amount,
                 identifier=intent["id"],
+                customer=customer,
                 callback_url=callback_url("/api/wallet/webhooks/amplopay/payment"),
             )
         except amplopay.AmploPayError as exc:
@@ -132,6 +177,13 @@ async def deposit_intent(
                 "mode": "amplopay",
                 "webhook_token": gateway_response.get("webhookToken"),
                 "gateway_status": gateway_response.get("status"),
+                "customer": {
+                    "name": customer["name"],
+                    "email": customer["email"],
+                    "phone": customer["phone"],
+                    "document_last4": customer["document"][-4:],
+                    "document_type": customer["document_type"],
+                },
                 "gateway_response": gateway_response,
             },
         ) or intent

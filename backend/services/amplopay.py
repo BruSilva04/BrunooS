@@ -59,6 +59,41 @@ async def create_pix_deposit(amount: float, identifier: str, callback_url: str |
     return await _request("POST", "/gateway/pix/deposit", payload)
 
 
+async def create_pix_receive(
+    amount: float,
+    identifier: str,
+    customer: dict[str, Any],
+    callback_url: str | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "identifier": identifier,
+        "amount": round(float(amount), 2),
+        "client": {
+            "name": customer["name"],
+            "email": customer["email"],
+            "phone": customer["phone"],
+            "document": customer["document"],
+        },
+        "products": [
+            {
+                "id": "sereia-credits",
+                "name": "Creditos Sereia Palace",
+                "quantity": 1,
+                "price": round(float(amount), 2),
+                "physical": False,
+            }
+        ],
+        "metadata": {
+            "provider": "sereia-do-tesouro",
+            "orderId": identifier,
+        },
+    }
+    if callback_url:
+        payload["callbackUrl"] = callback_url
+
+    return await _request("POST", "/gateway/pix/receive", payload)
+
+
 async def create_pix_transfer(
     amount: float,
     identifier: str,

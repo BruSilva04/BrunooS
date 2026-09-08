@@ -82,10 +82,15 @@ export function fetchWallet() {
   return request('/api/wallet/me');
 }
 
-export function createDepositIntent(amount) {
+export function createDepositIntent(amount, customerName = '', customerDocument = '', customerDocumentType = 'cpf') {
   return request('/api/wallet/deposit-intents', {
     method: 'POST',
-    body: JSON.stringify({ amount }),
+    body: JSON.stringify({
+      amount,
+      customer_name: customerName || undefined,
+      customer_document: customerDocument || undefined,
+      customer_document_type: customerDocumentType || 'cpf',
+    }),
   });
 }
 

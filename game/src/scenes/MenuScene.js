@@ -178,6 +178,10 @@ export default class MenuScene extends Phaser.Scene {
 
     const hit = this.add.zone(x + 27, y + 14, 54, 34).setInteractive({ useHandCursor: true });
     hit.on('pointerdown', () => {
+      if (state.balance < value) {
+        this.cameras.main.shake(90, 0.004);
+        return;
+      }
       this.bet = value;
       this.betText.setText('R$ ' + this.bet.toFixed(2));
       this._refreshBetChips();
@@ -189,28 +193,36 @@ export default class MenuScene extends Phaser.Scene {
   _refreshBetChips() {
     this.betButtons.forEach((chip) => {
       const active = chip.value === this.bet;
+      const available = state.balance >= chip.value;
       chip.bg.clear();
-      chip.bg.fillStyle(active ? 0xf2c94c : 0x031c3a, active ? 1 : 0.96);
+      chip.bg.fillStyle(active ? 0xf2c94c : 0x031c3a, available ? (active ? 1 : 0.96) : 0.42);
       chip.bg.fillRoundedRect(chip.label.x - 27, chip.label.y - 14, 54, 34, 8);
-      chip.bg.lineStyle(1, active ? 0xffffff : 0x1bd8ff, active ? 0.72 : 0.22);
+      chip.bg.lineStyle(1, active ? 0xffffff : 0x1bd8ff, available ? (active ? 0.72 : 0.22) : 0.10);
       chip.bg.strokeRoundedRect(chip.label.x - 27, chip.label.y - 14, 54, 34, 8);
-      chip.label.setColor(active ? '#111827' : '#bdefff');
+      chip.label.setColor(active ? '#111827' : (available ? '#bdefff' : '#64748b'));
     });
   }
 
   _drawPlayButton() {
     const y = 520;
+    const canPlay = state.balance >= this.bet;
     const shadow = this.add.graphics();
     shadow.fillStyle(0x000000, 0.35);
     shadow.fillRoundedRect(54, y + 9, W - 108, 58, 8);
 
     const bg = this.add.graphics();
-    bg.fillGradientStyle(0x22d3ee, 0x22d3ee, 0x16a34a, 0x16a34a, 1);
+    bg.fillGradientStyle(
+      canPlay ? 0x22d3ee : 0x45404d,
+      canPlay ? 0x22d3ee : 0x45404d,
+      canPlay ? 0x16a34a : 0x24202c,
+      canPlay ? 0x16a34a : 0x24202c,
+      1
+    );
     bg.fillRoundedRect(44, y, W - 88, 60, 8);
     bg.lineStyle(2, 0xffffff, 0.35);
     bg.strokeRoundedRect(44, y, W - 88, 60, 8);
 
-    const label = this.add.text(W / 2, y + 30, 'MERGULHAR', {
+    const label = this.add.text(W / 2, y + 30, canPlay ? 'MERGULHAR' : 'SALDO INSUFICIENTE', {
       fontSize: '20px',
       fontFamily: '"Arial Black", Arial, sans-serif',
       color: '#ffffff',
@@ -221,7 +233,13 @@ export default class MenuScene extends Phaser.Scene {
     const hit = this.add.zone(W / 2, y + 30, W - 88, 60).setInteractive({ useHandCursor: true });
     hit.on('pointerover', () => label.setScale(1.04));
     hit.on('pointerout', () => label.setScale(1));
-    hit.on('pointerdown', () => this.scene.start('Game', { bet: this.bet }));
+    hit.on('pointerdown', () => {
+      if (state.balance < this.bet) {
+        this.scene.start('Lobby', { tab: 'promo' });
+        return;
+      }
+      this.scene.start('Game', { bet: this.bet });
+    });
 
     this.tweens.add({ targets: [bg, label], y: '-=4', duration: 900, yoyo: true, repeat: -1, ease: 'Sine.inOut' });
   }
