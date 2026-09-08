@@ -12,6 +12,14 @@ from db.database import USERS_TABLE
 from db.database import get_supabase_client
 from db.database import init_db
 
+
+def cors_regex() -> str:
+    local_network = r"https?://(localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+):(3000|3001|5173)"
+    if os.getenv("ALLOW_VERCEL_PREVIEWS", "true").lower() == "true":
+        return rf"^(https://[a-z0-9-]+\.vercel\.app|{local_network})$"
+    return rf"^({local_network})$"
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     try:
@@ -33,7 +41,7 @@ app.add_middleware(
         "http://127.0.0.1:3000",
         *[origin.strip() for origin in os.getenv("ALLOWED_ORIGINS", "").split(",") if origin.strip()],
     ],
-    allow_origin_regex=r"^(https://[a-z0-9-]+\.vercel\.app|https?://(localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[0-1])\.\d+\.\d+):(3000|3001|5173))$",
+    allow_origin_regex=cors_regex(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
