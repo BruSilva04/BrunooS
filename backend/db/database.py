@@ -41,7 +41,29 @@ USER_COLUMNS = {
     "role",
     "permissions",
     "balance",
+    "bonus_balance",
+    "rollover_required",
+    "rollover_progress",
 }
+
+BONUS_MIN_DEPOSIT = 100.0
+BONUS_RATE = 1.0
+ROLLOVER_MULTIPLIER = 2.0
+OPEN_WITHDRAWAL_STATUSES = [
+    "requested",
+    "approved",
+    "pending",
+    "processing",
+    "transferring",
+    "paid",
+]
+OPEN_SETTLEMENT_STATUSES = [
+    "requested",
+    "pending",
+    "processing",
+    "transferring",
+    "paid",
+]
 
 
 @lru_cache
@@ -73,20 +95,28 @@ async def ensure_admin_user():
         "username": username,
         "email": os.getenv("ADMIN_EMAIL", "admin@sereiadotesouro.local"),
         "phone": os.getenv("ADMIN_PHONE", "+5500000000000"),
-        "password_hash": hash_password(password or "@dm1n_"),
         "role": "admin",
         "permissions": {"admin": True, "play": True, "wallet": True, "users": True},
         "balance": 100000.0,
+        "bonus_balance": 0.0,
+        "rollover_required": 0.0,
+        "rollover_progress": 0.0,
     }
+    if password:
+        create_payload["password_hash"] = hash_password(password)
     update_payload = {
         key: value
         for key, value in create_payload.items()
-        if key not in {"balance", "password_hash"}
+        if key not in {"balance", "bonus_balance", "rollover_required", "rollover_progress", "password_hash"}
     }
     if password:
         update_payload["password_hash"] = create_payload["password_hash"]
 
     existing = await get_user_by_username(username)
+    if not existing and not password:
+        raise RuntimeError(
+            "Configure ADMIN_PASSWORD in the backend environment to bootstrap the admin user."
+        )
 
     def upsert_admin():
         client = get_supabase_client()
@@ -205,7 +235,16 @@ async def get_user_by_id(user_id: str) -> dict[str, Any] | None:
 
 
 async def update_user_profile(user_id: str, **kwargs: Any) -> dict[str, Any] | None:
-    allowed = {"legal_name", "document", "document_type", "phone", "email"}
+    allowed = {
+        "legal_name",
+        "document",
+        "document_type",
+        "phone",
+        "email",
+        "bonus_balance",
+        "rollover_required",
+        "rollover_progress",
+    }
     updates = {key: value for key, value in kwargs.items() if key in allowed and value is not None}
     if not updates:
         return await get_user_by_id(user_id)
@@ -273,6 +312,27 @@ def require_wallet_ledger() -> bool:
     return os.getenv("REQUIRE_WALLET_LEDGER", "false").lower() == "true"
 
 
+def bonus_for_deposit(amount: float) -> float:
+    amount = round(float(amount), 2)
+    return round(amount * BONUS_RATE, 2) if amount >= BONUS_MIN_DEPOSIT else 0.0
+
+
+def rollover_status(user: dict[str, Any]) -> dict[str, Any]:
+    required = round(float(user.get("rollover_required", 0) or 0), 2)
+    progress = round(float(user.get("rollover_progress", 0) or 0), 2)
+    remaining = round(max(0.0, required - progress), 2)
+    percent = 100 if required <= 0 else round(min(100.0, (progress / required) * 100))
+    return {
+        "required": required,
+        "progress": min(progress, required) if required > 0 else progress,
+        "remaining": remaining,
+        "complete": remaining <= 0.01,
+        "percent": percent,
+        "multiplier": ROLLOVER_MULTIPLIER,
+        "bonus_min_deposit": BONUS_MIN_DEPOSIT,
+    }
+
+
 async def adjust_user_balance_rpc(
     user_id: str,
     delta: float,
@@ -281,6 +341,8 @@ async def adjust_user_balance_rpc(
     reference_id: str | None = None,
     idempotency_key: str | None = None,
     metadata: dict[str, Any] | None = None,
+    rollover_required_delta: float = 0.0,
+    bonus_delta: float = 0.0,
 ) -> tuple[bool, float] | None:
     params = {
         "p_user_id": user_id,
@@ -290,6 +352,8 @@ async def adjust_user_balance_rpc(
         "p_reference_id": reference_id,
         "p_idempotency_key": idempotency_key,
         "p_metadata": metadata or {},
+        "p_rollover_required_delta": round(float(rollover_required_delta), 2),
+        "p_bonus_delta": round(float(bonus_delta), 2),
     }
 
     def call_rpc():
@@ -311,6 +375,8 @@ async def adjust_user_balance(
     reference_id: str | None = None,
     idempotency_key: str | None = None,
     metadata: dict[str, Any] | None = None,
+    rollover_required_delta: float = 0.0,
+    bonus_delta: float = 0.0,
 ) -> tuple[bool, float]:
     try:
         rpc_result = await adjust_user_balance_rpc(
@@ -321,6 +387,8 @@ async def adjust_user_balance(
             reference_id=reference_id,
             idempotency_key=idempotency_key,
             metadata=metadata,
+            rollover_required_delta=rollover_required_delta,
+            bonus_delta=bonus_delta,
         )
         if rpc_result is not None:
             return rpc_result
@@ -345,6 +413,17 @@ async def adjust_user_balance(
 
     current_balance = float(user.get("balance", 0) or 0)
     new_balance = round(current_balance + delta, 2)
+    current_rollover_required = float(user.get("rollover_required", 0) or 0)
+    current_rollover_progress = float(user.get("rollover_progress", 0) or 0)
+    current_bonus_balance = float(user.get("bonus_balance", 0) or 0)
+    new_rollover_required = round(max(0.0, current_rollover_required + rollover_required_delta), 2)
+    new_rollover_progress = round(current_rollover_progress, 2)
+    if transaction_type == "bet" and delta < 0 and new_rollover_progress < new_rollover_required:
+        new_rollover_progress = round(min(new_rollover_required, new_rollover_progress + abs(delta)), 2)
+    effective_bonus_delta = bonus_delta
+    if transaction_type in {"bet", "withdrawal_hold"} and delta < 0:
+        effective_bonus_delta -= min(current_bonus_balance, abs(delta))
+    new_bonus_balance = round(max(0.0, current_bonus_balance + effective_bonus_delta), 2)
     if new_balance < 0:
         return False, current_balance
 
@@ -352,7 +431,12 @@ async def adjust_user_balance(
         return (
             get_supabase_client()
             .table(USERS_TABLE)
-            .update({"balance": new_balance})
+            .update({
+                "balance": new_balance,
+                "bonus_balance": new_bonus_balance,
+                "rollover_required": new_rollover_required,
+                "rollover_progress": new_rollover_progress,
+            })
             .eq("id", user_id)
             .execute()
         )
@@ -435,16 +519,28 @@ async def confirm_payment_intent(intent_id: str, admin_user_id: str | None = Non
     if intent.get("status") == "paid":
         return intent
 
-    amount = float(intent.get("amount", 0) or 0)
+    amount = round(float(intent.get("amount", 0) or 0), 2)
+    bonus_amount = bonus_for_deposit(amount)
+    credited_amount = round(amount + bonus_amount, 2)
+    rollover_required_added = round(credited_amount * ROLLOVER_MULTIPLIER, 2)
     user_id = intent["user_id"]
     ok, balance = await adjust_user_balance(
         user_id,
-        amount,
+        credited_amount,
         transaction_type="deposit",
         reference_type="payment_intent",
         reference_id=intent_id,
         idempotency_key=f"deposit:{intent_id}",
-        metadata={"provider": intent.get("provider"), "confirmed_by": admin_user_id or "sandbox"},
+        metadata={
+            "provider": intent.get("provider"),
+            "confirmed_by": admin_user_id or "sandbox",
+            "deposit_amount": amount,
+            "bonus_amount": bonus_amount,
+            "credited_amount": credited_amount,
+            "rollover_required_added": rollover_required_added,
+        },
+        rollover_required_delta=rollover_required_added,
+        bonus_delta=bonus_amount,
     )
     if not ok:
         return None
@@ -453,7 +549,17 @@ async def confirm_payment_intent(intent_id: str, admin_user_id: str | None = Non
         return (
             get_supabase_client()
             .table(PAYMENT_INTENTS_TABLE)
-            .update({"status": "paid", "metadata": {**(intent.get("metadata") or {}), "balance_after": balance}})
+            .update({
+                "status": "paid",
+                "metadata": {
+                    **(intent.get("metadata") or {}),
+                    "balance_after": balance,
+                    "deposit_amount": amount,
+                    "bonus_amount": bonus_amount,
+                    "credited_amount": credited_amount,
+                    "rollover_required_added": rollover_required_added,
+                },
+            })
             .eq("id", intent_id)
             .execute()
         )
@@ -518,6 +624,17 @@ async def create_withdrawal_request(
     owner_document_type: str | None = None,
 ) -> tuple[bool, dict[str, Any] | float]:
     amount = round(float(amount), 2)
+    user = await get_user_by_id(user_id)
+    if not user:
+        return False, 0.0
+    rollover = rollover_status(user)
+    if not rollover["complete"]:
+        return False, {
+            "reason": "rollover",
+            "balance": float(user.get("balance", 0) or 0),
+            "rollover": rollover,
+        }
+
     withdrawal_id = str(uuid.uuid4())
     ok, balance = await adjust_user_balance(
         user_id,
@@ -607,7 +724,17 @@ async def get_operator_finance_report() -> dict[str, Any]:
             get_supabase_client()
             .table(WITHDRAWAL_REQUESTS_TABLE)
             .select("amount,status")
-            .in_("status", ["requested", "approved"])
+            .in_("status", OPEN_WITHDRAWAL_STATUSES)
+            .limit(10000)
+            .execute()
+        )
+
+    def fetch_paid_deposits():
+        return (
+            get_supabase_client()
+            .table(PAYMENT_INTENTS_TABLE)
+            .select("amount,status")
+            .eq("status", "paid")
             .limit(10000)
             .execute()
         )
@@ -617,37 +744,64 @@ async def get_operator_finance_report() -> dict[str, Any]:
             get_supabase_client()
             .table(OPERATOR_SETTLEMENTS_TABLE)
             .select("amount,status")
-            .in_("status", ["requested", "pending", "processing", "transferring", "paid"])
+            .in_("status", OPEN_SETTLEMENT_STATUSES)
             .limit(10000)
             .execute()
         )
 
-    rounds, withdrawals, settlements = await asyncio.gather(
+    def fetch_player_balances():
+        return (
+            get_supabase_client()
+            .table(USERS_TABLE)
+            .select("balance,rollover_required,rollover_progress")
+            .neq("role", "admin")
+            .limit(10000)
+            .execute()
+        )
+
+    rounds, withdrawals, paid_deposits, settlements, player_balances = await asyncio.gather(
         anyio.to_thread.run_sync(fetch_rounds),
         anyio.to_thread.run_sync(fetch_withdrawals),
+        anyio.to_thread.run_sync(fetch_paid_deposits),
         anyio.to_thread.run_sync(fetch_settlements),
+        anyio.to_thread.run_sync(fetch_player_balances),
     )
 
     round_rows = rounds.data or []
     withdrawal_rows = withdrawals.data or []
+    paid_deposit_rows = paid_deposits.data or []
     settlement_rows = settlements.data or []
+    player_balance_rows = player_balances.data or []
     total_bets = round(sum(float(row.get("bet", 0) or 0) for row in round_rows), 2)
     total_payouts = round(sum(float(row.get("payout", 0) or 0) for row in round_rows), 2)
     gross_gaming_revenue = round(total_bets - total_payouts, 2)
+    confirmed_deposits_gross = round(sum(float(row.get("amount", 0) or 0) for row in paid_deposit_rows), 2)
     pending_withdrawals = round(sum(float(row.get("amount", 0) or 0) for row in withdrawal_rows), 2)
     reserved_settlements = round(sum(float(row.get("amount", 0) or 0) for row in settlement_rows), 2)
-    available_for_settlement = round(
-        max(0.0, gross_gaming_revenue - pending_withdrawals - reserved_settlements),
+    player_balance_liability = round(sum(float(row.get("balance", 0) or 0) for row in player_balance_rows), 2)
+    rollover_required = round(sum(float(row.get("rollover_required", 0) or 0) for row in player_balance_rows), 2)
+    rollover_progress = round(sum(float(row.get("rollover_progress", 0) or 0) for row in player_balance_rows), 2)
+    rollover_remaining = round(max(0.0, rollover_required - rollover_progress), 2)
+    available_cash_gross = round(
+        max(0.0, confirmed_deposits_gross - player_balance_liability - pending_withdrawals - reserved_settlements),
         2,
     )
+    available_ggr = round(max(0.0, gross_gaming_revenue - pending_withdrawals - reserved_settlements), 2)
+    available_for_settlement = round(min(available_cash_gross, available_ggr), 2)
 
     return {
         "rounds": len(round_rows),
+        "confirmed_deposits_gross": confirmed_deposits_gross,
         "total_bets": total_bets,
         "total_payouts": total_payouts,
         "gross_gaming_revenue": gross_gaming_revenue,
         "pending_withdrawals": pending_withdrawals,
         "reserved_settlements": reserved_settlements,
+        "player_balance_liability": player_balance_liability,
+        "available_cash_gross": available_cash_gross,
+        "rollover_required": rollover_required,
+        "rollover_progress": min(rollover_progress, rollover_required) if rollover_required > 0 else rollover_progress,
+        "rollover_remaining": rollover_remaining,
         "available_for_settlement": available_for_settlement,
     }
 
@@ -767,6 +921,8 @@ async def list_wallet_snapshot(user_id: str) -> dict[str, Any] | None:
 
     return {
         "balance": float(user.get("balance", 0) or 0),
+        "bonus_balance": float(user.get("bonus_balance", 0) or 0),
+        "rollover": rollover_status(user),
         "transactions": transactions.data or [],
         "deposits": deposits.data or [],
         "withdrawals": withdrawals.data or [],
@@ -828,6 +984,8 @@ async def get_lobby_snapshot(user_id: str) -> dict[str, Any] | None:
             "permissions": user.get("permissions", {}),
         },
         "balance": float(user.get("balance", 0) or 0),
+        "bonus_balance": float(user.get("bonus_balance", 0) or 0),
+        "rollover": rollover_status(user),
         "stats": {
             "rounds": len(rounds),
             "maxMult": round(max_mult, 2),

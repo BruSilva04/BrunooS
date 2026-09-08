@@ -123,16 +123,20 @@ export default class LobbyScene extends Phaser.Scene {
   _lobbyHtml() {
     const stats = this.snapshot?.stats || { rounds: 0, maxMult: 1, winRate: 0 };
     const history = this.snapshot?.history || [];
+    const bonusBalance = Number(this.snapshot?.bonus_balance || 0);
 
     return `
       <section class="wallet-card">
         <span>SALDO DISPONIVEL</span>
         <strong>${this._money(state.balance)}</strong>
+        ${bonusBalance > 0 ? `<p class="bonus-balance">Bonus ativo: ${this._money(bonusBalance)}</p>` : ''}
         <div class="wallet-actions">
           <button class="gold-btn" type="button" data-action="deposit">Depositar</button>
           <button class="dark-btn" type="button" data-action="withdraw">Sacar Pix</button>
         </div>
       </section>
+
+      ${this._rolloverHtml()}
 
       <button class="promo-strip" type="button" data-tab="promo">
         <span>EXCLUSIVO</span>
@@ -188,17 +192,18 @@ export default class LobbyScene extends Phaser.Scene {
         <div class="bonus-copy">
           <span>RECARGUE E GANHE</span>
           <strong>100%</strong>
-          <p>DO VALOR EM <small>bonus</small></p>
+          <p>A PARTIR DE R$ 100 <small>bonus</small></p>
         </div>
         <button type="button" data-action="deposit">RECARREGAR</button>
       </section>
 
       <section class="promo-ledger">
         <h3>COMO FICA NA CONTA</h3>
-        ${this._promoLineHtml('Recarga', 'R$ 50,00')}
-        ${this._promoLineHtml('Bonus', '+ R$ 50,00', true)}
-        ${this._promoLineHtml('Total', 'R$ 100,00', true)}
-        <p>Oferta valida para recargas selecionadas. Deposito real ainda nao esta conectado.</p>
+        ${this._promoLineHtml('Recarga', 'R$ 100,00')}
+        ${this._promoLineHtml('Bonus', '+ R$ 100,00', true)}
+        ${this._promoLineHtml('Saldo', 'R$ 200,00', true)}
+        ${this._promoLineHtml('Rollover saque', 'R$ 400,00')}
+        <p>Bonus de 100% somente para depositos de R$ 100,00 ou mais. Depositos menores entram sem bonus e exigem 2x de movimentacao.</p>
       </section>
     `;
   }
@@ -206,6 +211,7 @@ export default class LobbyScene extends Phaser.Scene {
   _profileHtml() {
     const user = this.snapshot?.user || this.user || {};
     const stats = this.snapshot?.stats || { rounds: 0, maxMult: 1, winRate: 0 };
+    const rollover = this._rollover();
     const initial = String(user.username || 'S').slice(0, 1).toUpperCase();
 
     return `
@@ -226,6 +232,9 @@ export default class LobbyScene extends Phaser.Scene {
         ${this._profileRowHtml('Telefone', user.phone || '-')}
         ${this._profileRowHtml('Nome', user.legal_name || '-')}
         ${this._profileRowHtml('CPF/CNPJ', user.document_masked || '-')}
+        ${this._profileRowHtml('Saldo', this._money(state.balance))}
+        ${this._profileRowHtml('Bonus', this._money(this.snapshot?.bonus_balance || 0))}
+        ${this._profileRowHtml('Falta rollover', this._money(rollover.remaining || 0))}
       </section>
 
       <section class="stats-grid profile-stats">
@@ -263,6 +272,8 @@ export default class LobbyScene extends Phaser.Scene {
     const deposit = this.currentDeposit?.intent;
     const user = this.snapshot?.user || this.user || {};
     const needsCustomer = isDeposit && !user.has_kyc;
+    const rollover = this._rollover();
+    const canWithdraw = rollover.complete;
 
     if (isDeposit) {
       return `
@@ -286,6 +297,7 @@ export default class LobbyScene extends Phaser.Scene {
             ${deposit ? `
               <div class="pix-box">
                 <strong>${this._money(deposit.amount)}</strong>
+                <span>${this._depositPreviewText(deposit.amount)}</span>
                 <code>${this._escape(deposit.pix_copy_paste || '')}</code>
               </div>
               ${this.currentDeposit?.sandbox ? `<button type="button" data-action="deposit-confirm" data-intent-id="${this._escape(deposit.id)}">SIMULAR PIX PAGO</button>` : ''}
@@ -301,7 +313,8 @@ export default class LobbyScene extends Phaser.Scene {
       <div class="modal-backdrop" data-action="close-modal">
         <section class="modal-card wallet-modal" role="dialog" aria-modal="true" aria-label="${title}">
           <h2>${title}</h2>
-          <p>Solicite o saque para uma chave Pix. O valor fica reservado na carteira.</p>
+          <p>${canWithdraw ? 'Solicite o saque para uma chave Pix. O valor fica reservado na carteira.' : `Movimente mais ${this._money(rollover.remaining || 0)} antes de sacar.`}</p>
+          ${!canWithdraw ? this._rolloverHtml(true) : ''}
           <label>
             Valor
             <input name="withdraw-amount" inputmode="decimal" value="20" />
@@ -329,7 +342,7 @@ export default class LobbyScene extends Phaser.Scene {
             <option value="cpf">CPF</option>
             <option value="cnpj">CNPJ</option>
           </select>
-          <button type="button" data-action="withdraw-submit">SOLICITAR SAQUE</button>
+          <button type="button" data-action="withdraw-submit" ${canWithdraw ? '' : 'disabled'}>SOLICITAR SAQUE</button>
           ${message}
           <button type="button" data-action="close-modal">FECHAR</button>
         </section>
@@ -374,6 +387,58 @@ export default class LobbyScene extends Phaser.Scene {
         <strong>${this._escape(value)}</strong>
       </div>
     `;
+  }
+
+  _rollover() {
+    return this.snapshot?.rollover || {
+      required: 0,
+      progress: 0,
+      remaining: 0,
+      complete: true,
+      percent: 100,
+    };
+  }
+
+  _rolloverHtml(compact = false) {
+    const rollover = this._rollover();
+    if (!rollover.required || rollover.complete) {
+      return compact ? '' : `
+        <section class="rollover-card complete">
+          <div>
+            <span>SAQUE LIBERADO</span>
+            <strong>Rollover completo</strong>
+          </div>
+        </section>
+      `;
+    }
+
+    const progress = Math.min(100, Math.max(0, Number(rollover.percent || 0)));
+    return `
+      <section class="rollover-card ${compact ? 'compact' : ''}">
+        <div class="rollover-head">
+          <span>ROLLOVER</span>
+          <strong>${progress}%</strong>
+        </div>
+        <div class="rollover-progress">
+          <i style="width: ${progress}%"></i>
+        </div>
+        <div class="rollover-lines">
+          <span>${this._money(rollover.progress || 0)} / ${this._money(rollover.required || 0)}</span>
+          <strong>Falta ${this._money(rollover.remaining || 0)}</strong>
+        </div>
+      </section>
+    `;
+  }
+
+  _depositPreviewText(amount) {
+    const value = Number(amount || 0);
+    const bonus = value >= 100 ? value : 0;
+    const credit = value + bonus;
+    const rollover = credit * 2;
+    if (bonus > 0) {
+      return `Credito ${this._money(credit)} com bonus. Rollover ${this._money(rollover)}.`;
+    }
+    return `Credito ${this._money(value)}. Rollover ${this._money(rollover)}.`;
   }
 
   _bindDom() {
@@ -474,6 +539,13 @@ export default class LobbyScene extends Phaser.Scene {
 
   async _submitWithdrawal() {
     if (this.walletBusy) return;
+    const rollover = this._rollover();
+    if (!rollover.complete) {
+      this.walletMessage = `Movimente mais ${this._money(rollover.remaining || 0)} antes de sacar.`;
+      this._render();
+      return;
+    }
+
     const amountInput = this.root.querySelector('[name="withdraw-amount"]');
     const keyInput = this.root.querySelector('[name="withdraw-key"]');
     const typeInput = this.root.querySelector('[name="withdraw-key-type"]');
@@ -685,6 +757,7 @@ export default class LobbyScene extends Phaser.Scene {
           min-height: 0;
         }
         .wallet-card,
+        .rollover-card,
         .game-card,
         .history-panel,
         .promo-ledger,
@@ -725,6 +798,77 @@ export default class LobbyScene extends Phaser.Scene {
           font: 900 36px/1 "Arial Black", Arial, sans-serif;
           text-shadow: 0 3px 0 rgba(0, 0, 0, 0.35);
           margin-bottom: 12px;
+        }
+        .bonus-balance {
+          position: relative;
+          z-index: 1;
+          margin: -4px 0 12px;
+          color: #80ffd7;
+          font-size: 13px;
+          font-weight: 900;
+        }
+        .rollover-card {
+          padding: 12px;
+          display: grid;
+          gap: 9px;
+        }
+        .rollover-card.complete {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+        }
+        .rollover-card.complete span,
+        .rollover-head span {
+          display: block;
+          color: #f4c84a;
+          font: 900 11px/1 "Arial Black", Arial, sans-serif;
+        }
+        .rollover-card.complete strong {
+          display: block;
+          margin-top: 5px;
+          color: #80ffd7;
+          font: 900 16px/1 "Arial Black", Arial, sans-serif;
+        }
+        .rollover-card.compact {
+          border-radius: 10px;
+          padding: 10px;
+          background: rgba(23, 17, 29, 0.96);
+        }
+        .rollover-head {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+        }
+        .rollover-head strong {
+          color: #fff7dc;
+          font: 900 15px/1 "Arial Black", Arial, sans-serif;
+        }
+        .rollover-progress {
+          height: 9px;
+          border-radius: 999px;
+          overflow: hidden;
+          background: rgba(0, 0, 0, 0.38);
+          border: 1px solid rgba(244, 200, 74, 0.20);
+        }
+        .rollover-progress i {
+          display: block;
+          height: 100%;
+          min-width: 0;
+          border-radius: inherit;
+          background: linear-gradient(90deg, #37d9ff, #80ffd7, #f4c84a);
+        }
+        .rollover-lines {
+          display: flex;
+          justify-content: space-between;
+          gap: 10px;
+          color: #e0b39a;
+          font-size: 12px;
+          font-weight: 900;
+        }
+        .rollover-lines strong {
+          color: #ffdf72;
+          font-size: 12px;
         }
         .wallet-actions,
         .profile-actions {
@@ -1231,6 +1375,11 @@ export default class LobbyScene extends Phaser.Scene {
           color: #80ffd7;
           font: 900 18px/1 "Arial Black", Arial, sans-serif;
         }
+        .pix-box span {
+          margin: 0;
+          color: #ffdca0;
+          font: 800 12px/1.3 Arial, sans-serif;
+        }
         .pix-box code {
           display: block;
           max-height: 70px;
@@ -1248,6 +1397,12 @@ export default class LobbyScene extends Phaser.Scene {
           min-width: 130px;
           color: #330009;
           background: linear-gradient(180deg, #ffe58d, #d59d19);
+        }
+        .modal-card button:disabled {
+          color: #9ca3af;
+          background: #27212b;
+          cursor: not-allowed;
+          border: 1px solid rgba(156, 163, 175, 0.20);
         }
         @media (max-height: 720px) {
           .lobby-shell {

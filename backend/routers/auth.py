@@ -10,6 +10,7 @@ from db.database import (
     get_user_by_email,
     get_user_by_id,
     get_user_by_username,
+    rollover_status,
 )
 from services.auth import create_session_token, hash_password, verify_password, verify_session_token
 
@@ -84,6 +85,8 @@ def public_user(user: dict) -> dict:
         "role": user.get("role", "player"),
         "permissions": user.get("permissions", {}),
         "balance": float(user.get("balance", 0) or 0),
+        "bonus_balance": float(user.get("bonus_balance", 0) or 0),
+        "rollover": rollover_status(user),
     }
 
 
@@ -93,7 +96,14 @@ def db_unavailable(exc: Exception) -> HTTPException:
         detail = "Supabase nao configurado no Render. Cadastre SUPABASE_URL e SUPABASE_SECRET_KEY nas Environment Variables do backend."
     elif "public.users" in error_text or "PGRST205" in error_text:
         detail = "Tabela public.users nao existe no Supabase. Aplique backend/db/schema.sql no SQL Editor."
-    elif "legal_name" in error_text or "document" in error_text:
+    elif (
+        "legal_name" in error_text
+        or "document" in error_text
+        or "bonus_balance" in error_text
+        or "rollover_required" in error_text
+        or "rollover_progress" in error_text
+        or "adjust_wallet_balance" in error_text
+    ):
         detail = "Schema de usuarios desatualizado. Rode novamente backend/db/schema.sql no SQL Editor do Supabase."
     else:
         detail = "Banco Supabase indisponivel. Verifique SUPABASE_URL, SUPABASE_SECRET_KEY e permissoes do projeto."

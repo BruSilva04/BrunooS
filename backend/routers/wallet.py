@@ -343,6 +343,12 @@ async def withdrawal_request(
         owner_document_type=payload.owner_document_type,
     )
     if not ok:
+        if isinstance(result, dict) and result.get("reason") == "rollover":
+            remaining = float((result.get("rollover") or {}).get("remaining", 0) or 0)
+            raise HTTPException(
+                status_code=409,
+                detail=f"Rollover pendente. Movimente mais R$ {remaining:.2f} antes de sacar.",
+            )
         raise HTTPException(status_code=409, detail=f"Saldo insuficiente. Saldo atual: R$ {float(result):.2f}")
 
     if provider == "amplopay":
@@ -487,7 +493,13 @@ async def operator_report(authorization: str | None = Header(default=None)):
     user = await current_user(authorization)
     if not is_admin(user):
         raise HTTPException(status_code=403, detail="Acesso exclusivo para admin")
-    return await get_operator_finance_report()
+    report = await get_operator_finance_report()
+    if payment_provider() == "amplopay":
+        try:
+            report["payment_provider_balance"] = redacted_payload(await amplopay.get_producer_balance())
+        except amplopay.AmploPayError as exc:
+            report["payment_provider_balance_error"] = str(exc)
+    return report
 
 
 @router.post("/admin/operator-settlements")
