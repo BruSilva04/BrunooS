@@ -95,9 +95,16 @@ export function confirmSandboxDeposit(intentId) {
   });
 }
 
-export function requestWithdrawal(amount, pixKey, pixKeyType = 'random') {
+export function requestWithdrawal(amount, pixKey, pixKeyType = 'random', ownerName = '', ownerDocument = '', ownerDocumentType = 'cpf') {
   return request('/api/wallet/withdrawals', {
     method: 'POST',
-    body: JSON.stringify({ amount, pix_key: pixKey, pix_key_type: pixKeyType }),
+    body: JSON.stringify({
+      amount,
+      pix_key: pixKey,
+      pix_key_type: pixKeyType,
+      owner_name: ownerName,
+      owner_document: ownerDocument,
+      owner_document_type: ownerDocumentType,
+    }),
   });
 }

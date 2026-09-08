@@ -303,6 +303,18 @@ export default class LobbyScene extends Phaser.Scene {
             <option value="cpf">CPF</option>
             <option value="cnpj">CNPJ</option>
           </select>
+          <label>
+            Titular
+            <input name="withdraw-owner-name" placeholder="Nome completo" />
+          </label>
+          <label>
+            Documento do titular
+            <input name="withdraw-owner-document" inputmode="numeric" placeholder="CPF ou CNPJ" />
+          </label>
+          <select name="withdraw-owner-document-type">
+            <option value="cpf">CPF</option>
+            <option value="cnpj">CNPJ</option>
+          </select>
           <button type="button" data-action="withdraw-submit">SOLICITAR SAQUE</button>
           ${message}
           <button type="button" data-action="close-modal">FECHAR</button>
@@ -440,9 +452,15 @@ export default class LobbyScene extends Phaser.Scene {
     const amountInput = this.root.querySelector('[name="withdraw-amount"]');
     const keyInput = this.root.querySelector('[name="withdraw-key"]');
     const typeInput = this.root.querySelector('[name="withdraw-key-type"]');
+    const ownerNameInput = this.root.querySelector('[name="withdraw-owner-name"]');
+    const ownerDocumentInput = this.root.querySelector('[name="withdraw-owner-document"]');
+    const ownerDocumentTypeInput = this.root.querySelector('[name="withdraw-owner-document-type"]');
     const amount = Number(String(amountInput?.value || '').replace(',', '.'));
     const pixKey = String(keyInput?.value || '').trim();
     const pixKeyType = String(typeInput?.value || 'random');
+    const ownerName = String(ownerNameInput?.value || '').trim();
+    const ownerDocument = String(ownerDocumentInput?.value || '').trim();
+    const ownerDocumentType = String(ownerDocumentTypeInput?.value || 'cpf');
 
     if (!Number.isFinite(amount) || amount < 20) {
       this.walletMessage = 'Valor minimo para saque: R$ 20,00.';
@@ -454,13 +472,18 @@ export default class LobbyScene extends Phaser.Scene {
       this._render();
       return;
     }
+    if (ownerName.length < 3 || ownerDocument.length < 11) {
+      this.walletMessage = 'Informe titular e CPF/CNPJ do saque.';
+      this._render();
+      return;
+    }
 
     this.walletBusy = true;
     this.walletMessage = 'Solicitando saque...';
     this._render();
 
     try {
-      await requestWithdrawal(amount, pixKey, pixKeyType);
+      await requestWithdrawal(amount, pixKey, pixKeyType, ownerName, ownerDocument, ownerDocumentType);
       this.walletMessage = 'Saque solicitado.';
       await this._loadLobby();
     } catch (error) {

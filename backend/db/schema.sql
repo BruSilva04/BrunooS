@@ -75,6 +75,9 @@ CREATE TABLE IF NOT EXISTS public.withdrawal_requests (
     amount double precision NOT NULL,
     pix_key text NOT NULL,
     pix_key_type text NOT NULL DEFAULT 'random',
+    owner_name text,
+    owner_document text,
+    owner_document_type text,
     status text NOT NULL DEFAULT 'requested',
     provider_transfer_id text,
     reviewed_by text,
@@ -85,6 +88,11 @@ CREATE TABLE IF NOT EXISTS public.withdrawal_requests (
 
 CREATE INDEX IF NOT EXISTS withdrawal_requests_user_created_idx
     ON public.withdrawal_requests (user_id, created_at DESC);
+
+ALTER TABLE public.withdrawal_requests
+    ADD COLUMN IF NOT EXISTS owner_name text,
+    ADD COLUMN IF NOT EXISTS owner_document text,
+    ADD COLUMN IF NOT EXISTS owner_document_type text;
 
 CREATE TABLE IF NOT EXISTS public.operator_settlements (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),

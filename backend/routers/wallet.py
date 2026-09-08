@@ -1,18 +1,25 @@
 import os
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from db.database import (
+    adjust_user_balance,
     confirm_payment_intent,
     create_operator_settlement,
     create_payment_intent,
     create_withdrawal_request,
     get_operator_finance_report,
     get_payment_intent,
+    get_payment_intent_by_provider_id,
     get_user_by_id,
+    get_withdrawal_request,
+    get_withdrawal_by_provider_transfer_id,
     list_wallet_snapshot,
+    update_payment_intent,
+    update_withdrawal_request,
 )
+from services import amplopay
 from services.auth import verify_session_token
 
 router = APIRouter(prefix="/api/wallet", tags=["wallet"])
@@ -26,6 +33,9 @@ class WithdrawRequest(BaseModel):
     amount: float = Field(ge=20, le=5000)
     pix_key: str = Field(min_length=5, max_length=140)
     pix_key_type: str = Field(default="random", pattern=r"^(cpf|cnpj|email|phone|random)$")
+    owner_name: str | None = Field(default=None, min_length=3, max_length=120)
+    owner_document: str | None = Field(default=None, min_length=11, max_length=18)
+    owner_document_type: str | None = Field(default="cpf", pattern=r"^(cpf|cnpj)$")
 
 
 class OperatorSettlementRequest(BaseModel):
@@ -57,6 +67,21 @@ def is_admin(user: dict) -> bool:
     return user.get("role") == "admin" or bool(permissions.get("admin"))
 
 
+def payment_provider() -> str:
+    return os.getenv("PAYMENT_PROVIDER", "sandbox").strip().lower() or "sandbox"
+
+
+def callback_url(path: str) -> str:
+    base_url = (
+        os.getenv("BACKEND_PUBLIC_URL")
+        or os.getenv("RENDER_EXTERNAL_URL")
+        or ""
+    ).strip().rstrip("/")
+    if not base_url:
+        raise HTTPException(status_code=503, detail="Configure BACKEND_PUBLIC_URL para webhooks Amplopay")
+    return f"{base_url}{path}"
+
+
 @router.get("/me")
 async def wallet_me(authorization: str | None = Header(default=None)):
     user = await current_user(authorization)
@@ -72,15 +97,42 @@ async def deposit_intent(
     authorization: str | None = Header(default=None),
 ):
     user = await current_user(authorization)
-    provider = os.getenv("PAYMENT_PROVIDER", "sandbox").strip() or "sandbox"
-    if provider != "sandbox":
-        raise HTTPException(status_code=501, detail=f"Provider {provider} ainda nao implementado")
+    provider = payment_provider()
+    if provider not in {"sandbox", "amplopay"}:
+        raise HTTPException(status_code=501, detail=f"Provider {provider} nao suportado")
 
     intent = await create_payment_intent(user["id"], payload.amount, provider)
+
+    if provider == "amplopay":
+        try:
+            gateway_response = await amplopay.create_pix_deposit(
+                amount=payload.amount,
+                identifier=intent["id"],
+                callback_url=callback_url("/api/wallet/webhooks/amplopay/payment"),
+            )
+        except amplopay.AmploPayError as exc:
+            await update_payment_intent(intent["id"], status="failed", metadata={"error": str(exc)})
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+        pix = gateway_response.get("pix") or {}
+        intent = await update_payment_intent(
+            intent["id"],
+            provider_payment_id=gateway_response.get("transactionId"),
+            status="pending",
+            pix_qr_code=pix.get("image"),
+            pix_copy_paste=pix.get("code"),
+            metadata={
+                "mode": "amplopay",
+                "webhook_token": gateway_response.get("webhookToken"),
+                "gateway_status": gateway_response.get("status"),
+                "gateway_response": gateway_response,
+            },
+        ) or intent
+
     return {
         "intent": intent,
         "sandbox": provider == "sandbox",
-        "message": "Pix sandbox criado. Em producao, o credito acontece somente por webhook do provedor.",
+        "message": "Pix criado. O credito acontece somente apos confirmacao do provedor.",
     }
 
 
@@ -106,22 +158,148 @@ async def sandbox_confirm_deposit(
 
 @router.post("/withdrawals")
 async def withdrawal_request(
+    request: Request,
     payload: WithdrawRequest,
     authorization: str | None = Header(default=None),
 ):
     user = await current_user(authorization)
+    provider = payment_provider()
+    if provider not in {"sandbox", "amplopay"}:
+        raise HTTPException(status_code=501, detail=f"Provider {provider} nao suportado")
+
+    if provider == "amplopay":
+        if not payload.owner_name or not payload.owner_document:
+            raise HTTPException(status_code=422, detail="Nome e documento do titular sao obrigatorios para saque Amplopay")
+
     ok, result = await create_withdrawal_request(
         user["id"],
         payload.amount,
         payload.pix_key.strip(),
         payload.pix_key_type,
+        owner_name=payload.owner_name,
+        owner_document=payload.owner_document,
+        owner_document_type=payload.owner_document_type,
     )
     if not ok:
         raise HTTPException(status_code=409, detail=f"Saldo insuficiente. Saldo atual: R$ {float(result):.2f}")
+
+    if provider == "amplopay":
+        request_ip = request.client.host if request.client else "127.0.0.1"
+        try:
+            gateway_response = await amplopay.create_pix_transfer(
+                amount=payload.amount,
+                identifier=result["id"],
+                pix_key=payload.pix_key.strip(),
+                pix_key_type=payload.pix_key_type,
+                owner_name=payload.owner_name or user["username"],
+                owner_document=payload.owner_document or "",
+                owner_document_type=payload.owner_document_type or "cpf",
+                ip=request_ip,
+                callback_url=callback_url("/api/wallet/webhooks/amplopay/transfer"),
+            )
+        except amplopay.AmploPayError as exc:
+            await adjust_user_balance(
+                user["id"],
+                payload.amount,
+                transaction_type="withdrawal_refund",
+                reference_type="withdrawal_request",
+                reference_id=result["id"],
+                idempotency_key=f"withdrawal_refund:{result['id']}",
+                metadata={"reason": str(exc)},
+            )
+            await update_withdrawal_request(result["id"], status="failed", metadata={"error": str(exc)})
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+        withdraw = gateway_response.get("withdraw") or {}
+        result = await update_withdrawal_request(
+            result["id"],
+            status=str(withdraw.get("status") or "processing").lower(),
+            provider_transfer_id=withdraw.get("id"),
+            metadata={
+                **(result.get("metadata") or {}),
+                "mode": "amplopay",
+                "webhook_token": gateway_response.get("webhookToken"),
+                "gateway_response": gateway_response,
+            },
+        ) or result
+
     return {
         "withdrawal": result,
         "message": "Saque solicitado. Em producao, o pagamento Pix de saida deve passar por revisao/webhook.",
     }
+
+
+@router.post("/webhooks/amplopay/payment")
+async def amplopay_payment_webhook(request: Request):
+    payload = await request.json()
+    event = payload.get("event")
+    token = payload.get("token")
+    transaction = payload.get("transaction") or payload.get("payment") or payload
+    provider_id = transaction.get("id") or transaction.get("transactionId")
+    identifier = transaction.get("identifier") or transaction.get("clientIdentifier") or payload.get("identifier")
+    intent = await get_payment_intent_by_provider_id("amplopay", provider_id) if provider_id else None
+    if not intent and identifier:
+        intent = await get_payment_intent(identifier)
+    if not intent:
+        raise HTTPException(status_code=404, detail="Deposito nao encontrado")
+
+    metadata = intent.get("metadata") or {}
+    expected_token = metadata.get("webhook_token")
+    if expected_token and token != expected_token:
+        raise HTTPException(status_code=401, detail="Token de webhook invalido")
+
+    if event == "TRANSACTION_PAID":
+        updated = await confirm_payment_intent(intent["id"], "amplopay_webhook")
+    elif event in {"TRANSACTION_CANCELED", "TRANSACTION_REFUNDED", "TRANSACTION_CHARGED_BACK"}:
+        status = event.replace("TRANSACTION_", "").lower()
+        updated = await update_payment_intent(intent["id"], status=status, metadata={**metadata, "last_webhook": payload})
+    else:
+        updated = await update_payment_intent(intent["id"], metadata={**metadata, "last_webhook": payload})
+
+    return {"ok": True, "intent": updated}
+
+
+@router.post("/webhooks/amplopay/transfer")
+async def amplopay_transfer_webhook(request: Request):
+    payload = await request.json()
+    event = payload.get("event")
+    token = payload.get("token")
+    withdraw = payload.get("withdraw") or {}
+    provider_id = withdraw.get("id")
+    identifier = withdraw.get("clientIdentifier") or withdraw.get("identifier") or payload.get("identifier")
+    withdrawal = await get_withdrawal_by_provider_transfer_id(provider_id) if provider_id else None
+    if not withdrawal and identifier:
+        withdrawal = await get_withdrawal_request(identifier)
+    if not withdrawal:
+        raise HTTPException(status_code=404, detail="Saque nao encontrado")
+
+    metadata = withdrawal.get("metadata") or {}
+    expected_token = metadata.get("webhook_token")
+    if expected_token and token != expected_token:
+        raise HTTPException(status_code=401, detail="Token de webhook invalido")
+
+    if event == "TRANSFER_COMPLETED":
+        status = "paid"
+    elif event == "TRANSFER_FAILED":
+        status = "failed"
+        await adjust_user_balance(
+            withdrawal["user_id"],
+            float(withdrawal.get("amount", 0) or 0),
+            transaction_type="withdrawal_refund",
+            reference_type="withdrawal_request",
+            reference_id=withdrawal["id"],
+            idempotency_key=f"withdrawal_refund:{withdrawal['id']}",
+            metadata={"webhook": payload},
+        )
+    else:
+        status = str(withdraw.get("status") or "processing").lower()
+
+    updated = await update_withdrawal_request(
+        withdrawal["id"],
+        status=status,
+        metadata={**metadata, "last_webhook": payload},
+    )
+    return {"ok": True, "withdrawal": updated}
 
 
 @router.get("/admin/operator-report")

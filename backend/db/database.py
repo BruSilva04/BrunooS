@@ -292,23 +292,51 @@ async def adjust_user_balance(
 async def create_payment_intent(user_id: str, amount: float, provider: str = "sandbox") -> dict[str, Any]:
     intent_id = str(uuid.uuid4())
     amount = round(float(amount), 2)
+    is_sandbox = provider == "sandbox"
     payload = {
         "id": intent_id,
         "user_id": user_id,
         "provider": provider,
-        "provider_payment_id": f"sandbox_{intent_id}",
+        "provider_payment_id": f"sandbox_{intent_id}" if is_sandbox else None,
         "amount": amount,
         "status": "pending",
-        "pix_qr_code": f"SEREIA-SANDBOX-PIX:{intent_id}:{amount:.2f}",
-        "pix_copy_paste": f"SEREIA-SANDBOX-PIX:{intent_id}:{amount:.2f}",
-        "metadata": {"mode": "sandbox"},
+        "pix_qr_code": f"SEREIA-SANDBOX-PIX:{intent_id}:{amount:.2f}" if is_sandbox else None,
+        "pix_copy_paste": f"SEREIA-SANDBOX-PIX:{intent_id}:{amount:.2f}" if is_sandbox else None,
+        "metadata": {"mode": provider},
     }
+    payload = {key: value for key, value in payload.items() if value is not None}
 
     def insert_intent():
         return get_supabase_client().table(PAYMENT_INTENTS_TABLE).insert(payload).execute()
 
     response = await anyio.to_thread.run_sync(insert_intent)
     return response.data[0]
+
+
+async def update_payment_intent(intent_id: str, **kwargs: Any) -> dict[str, Any] | None:
+    allowed = {
+        "provider_payment_id",
+        "status",
+        "pix_qr_code",
+        "pix_copy_paste",
+        "expires_at",
+        "metadata",
+    }
+    updates = {key: value for key, value in kwargs.items() if key in allowed and value is not None}
+    if not updates:
+        return await get_payment_intent(intent_id)
+
+    def update_intent():
+        return (
+            get_supabase_client()
+            .table(PAYMENT_INTENTS_TABLE)
+            .update(updates)
+            .eq("id", intent_id)
+            .execute()
+        )
+
+    response = await anyio.to_thread.run_sync(update_intent)
+    return response.data[0] if response.data else None
 
 
 async def confirm_payment_intent(intent_id: str, admin_user_id: str | None = None) -> dict[str, Any] | None:
@@ -360,11 +388,45 @@ async def get_payment_intent(intent_id: str) -> dict[str, Any] | None:
     return response.data[0] if response.data else None
 
 
+async def get_payment_intent_by_provider_id(provider: str, provider_payment_id: str) -> dict[str, Any] | None:
+    def fetch_intent():
+        return (
+            get_supabase_client()
+            .table(PAYMENT_INTENTS_TABLE)
+            .select("*")
+            .eq("provider", provider)
+            .eq("provider_payment_id", provider_payment_id)
+            .limit(1)
+            .execute()
+        )
+
+    response = await anyio.to_thread.run_sync(fetch_intent)
+    return response.data[0] if response.data else None
+
+
+async def get_withdrawal_request(withdrawal_id: str) -> dict[str, Any] | None:
+    def fetch_withdrawal():
+        return (
+            get_supabase_client()
+            .table(WITHDRAWAL_REQUESTS_TABLE)
+            .select("*")
+            .eq("id", withdrawal_id)
+            .limit(1)
+            .execute()
+        )
+
+    response = await anyio.to_thread.run_sync(fetch_withdrawal)
+    return response.data[0] if response.data else None
+
+
 async def create_withdrawal_request(
     user_id: str,
     amount: float,
     pix_key: str,
     pix_key_type: str,
+    owner_name: str | None = None,
+    owner_document: str | None = None,
+    owner_document_type: str | None = None,
 ) -> tuple[bool, dict[str, Any] | float]:
     amount = round(float(amount), 2)
     withdrawal_id = str(uuid.uuid4())
@@ -386,15 +448,58 @@ async def create_withdrawal_request(
         "amount": amount,
         "pix_key": pix_key,
         "pix_key_type": pix_key_type,
+        "owner_name": owner_name,
+        "owner_document": owner_document,
+        "owner_document_type": owner_document_type,
         "status": "requested",
         "metadata": {"balance_after_hold": balance},
     }
+    payload = {key: value for key, value in payload.items() if value is not None}
 
     def insert_withdrawal():
         return get_supabase_client().table(WITHDRAWAL_REQUESTS_TABLE).insert(payload).execute()
 
     response = await anyio.to_thread.run_sync(insert_withdrawal)
     return True, response.data[0]
+
+
+async def update_withdrawal_request(withdrawal_id: str, **kwargs: Any) -> dict[str, Any] | None:
+    allowed = {
+        "status",
+        "provider_transfer_id",
+        "reviewed_by",
+        "metadata",
+    }
+    updates = {key: value for key, value in kwargs.items() if key in allowed and value is not None}
+    if not updates:
+        return None
+
+    def update_withdrawal():
+        return (
+            get_supabase_client()
+            .table(WITHDRAWAL_REQUESTS_TABLE)
+            .update(updates)
+            .eq("id", withdrawal_id)
+            .execute()
+        )
+
+    response = await anyio.to_thread.run_sync(update_withdrawal)
+    return response.data[0] if response.data else None
+
+
+async def get_withdrawal_by_provider_transfer_id(provider_transfer_id: str) -> dict[str, Any] | None:
+    def fetch_withdrawal():
+        return (
+            get_supabase_client()
+            .table(WITHDRAWAL_REQUESTS_TABLE)
+            .select("*")
+            .eq("provider_transfer_id", provider_transfer_id)
+            .limit(1)
+            .execute()
+        )
+
+    response = await anyio.to_thread.run_sync(fetch_withdrawal)
+    return response.data[0] if response.data else None
 
 
 async def get_operator_finance_report() -> dict[str, Any]:
