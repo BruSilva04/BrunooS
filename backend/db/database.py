@@ -528,7 +528,7 @@ async def get_operator_finance_report() -> dict[str, Any]:
             get_supabase_client()
             .table(OPERATOR_SETTLEMENTS_TABLE)
             .select("amount,status")
-            .in_("status", ["requested", "paid"])
+            .in_("status", ["requested", "pending", "processing", "transferring", "paid"])
             .limit(10000)
             .execute()
         )
@@ -563,7 +563,15 @@ async def get_operator_finance_report() -> dict[str, Any]:
     }
 
 
-async def create_operator_settlement(requested_by: str, amount: float) -> tuple[bool, dict[str, Any] | float]:
+async def create_operator_settlement(
+    requested_by: str,
+    amount: float,
+    pix_key: str | None = None,
+    pix_key_type: str | None = None,
+    owner_name: str | None = None,
+    owner_document: str | None = None,
+    owner_document_type: str | None = None,
+) -> tuple[bool, dict[str, Any] | float]:
     report = await get_operator_finance_report()
     amount = round(float(amount), 2)
     available = float(report["available_for_settlement"])
@@ -573,15 +581,55 @@ async def create_operator_settlement(requested_by: str, amount: float) -> tuple[
     payload = {
         "requested_by": requested_by,
         "amount": amount,
+        "pix_key": pix_key,
+        "pix_key_type": pix_key_type,
+        "owner_name": owner_name,
+        "owner_document": owner_document,
+        "owner_document_type": owner_document_type,
         "status": "requested",
         "metadata": {"report_snapshot": report},
     }
+    payload = {key: value for key, value in payload.items() if value is not None}
 
     def insert_settlement():
         return get_supabase_client().table(OPERATOR_SETTLEMENTS_TABLE).insert(payload).execute()
 
     response = await anyio.to_thread.run_sync(insert_settlement)
     return True, response.data[0]
+
+
+async def update_operator_settlement(settlement_id: str, **kwargs: Any) -> dict[str, Any] | None:
+    allowed = {"status", "provider_transfer_id", "metadata", "paid_at"}
+    updates = {key: value for key, value in kwargs.items() if key in allowed and value is not None}
+    if not updates:
+        return None
+
+    def update_settlement():
+        return (
+            get_supabase_client()
+            .table(OPERATOR_SETTLEMENTS_TABLE)
+            .update(updates)
+            .eq("id", settlement_id)
+            .execute()
+        )
+
+    response = await anyio.to_thread.run_sync(update_settlement)
+    return response.data[0] if response.data else None
+
+
+async def get_operator_settlement_by_provider_transfer_id(provider_transfer_id: str) -> dict[str, Any] | None:
+    def fetch_settlement():
+        return (
+            get_supabase_client()
+            .table(OPERATOR_SETTLEMENTS_TABLE)
+            .select("*")
+            .eq("provider_transfer_id", provider_transfer_id)
+            .limit(1)
+            .execute()
+        )
+
+    response = await anyio.to_thread.run_sync(fetch_settlement)
+    return response.data[0] if response.data else None
 
 
 async def list_wallet_snapshot(user_id: str) -> dict[str, Any] | None:

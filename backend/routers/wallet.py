@@ -10,12 +10,14 @@ from db.database import (
     create_payment_intent,
     create_withdrawal_request,
     get_operator_finance_report,
+    get_operator_settlement_by_provider_transfer_id,
     get_payment_intent,
     get_payment_intent_by_provider_id,
     get_user_by_id,
     get_withdrawal_request,
     get_withdrawal_by_provider_transfer_id,
     list_wallet_snapshot,
+    update_operator_settlement,
     update_payment_intent,
     update_withdrawal_request,
 )
@@ -40,6 +42,11 @@ class WithdrawRequest(BaseModel):
 
 class OperatorSettlementRequest(BaseModel):
     amount: float = Field(ge=20, le=1000000)
+    pix_key: str | None = Field(default=None, min_length=5, max_length=140)
+    pix_key_type: str | None = Field(default="random", pattern=r"^(cpf|cnpj|email|phone|random)$")
+    owner_name: str | None = Field(default=None, min_length=3, max_length=120)
+    owner_document: str | None = Field(default=None, min_length=11, max_length=18)
+    owner_document_type: str | None = Field(default="cpf", pattern=r"^(cpf|cnpj)$")
 
 
 def bearer_token(authorization: str | None) -> str | None:
@@ -270,10 +277,14 @@ async def amplopay_transfer_webhook(request: Request):
     withdrawal = await get_withdrawal_by_provider_transfer_id(provider_id) if provider_id else None
     if not withdrawal and identifier:
         withdrawal = await get_withdrawal_request(identifier)
-    if not withdrawal:
-        raise HTTPException(status_code=404, detail="Saque nao encontrado")
+    operator_settlement = None
+    if not withdrawal and provider_id:
+        operator_settlement = await get_operator_settlement_by_provider_transfer_id(provider_id)
+    if not withdrawal and not operator_settlement:
+        raise HTTPException(status_code=404, detail="Transferencia nao encontrada")
 
-    metadata = withdrawal.get("metadata") or {}
+    record = withdrawal or operator_settlement
+    metadata = record.get("metadata") or {}
     expected_token = metadata.get("webhook_token")
     if expected_token and token != expected_token:
         raise HTTPException(status_code=401, detail="Token de webhook invalido")
@@ -282,24 +293,33 @@ async def amplopay_transfer_webhook(request: Request):
         status = "paid"
     elif event == "TRANSFER_FAILED":
         status = "failed"
-        await adjust_user_balance(
-            withdrawal["user_id"],
-            float(withdrawal.get("amount", 0) or 0),
-            transaction_type="withdrawal_refund",
-            reference_type="withdrawal_request",
-            reference_id=withdrawal["id"],
-            idempotency_key=f"withdrawal_refund:{withdrawal['id']}",
-            metadata={"webhook": payload},
-        )
+        if withdrawal:
+            await adjust_user_balance(
+                withdrawal["user_id"],
+                float(withdrawal.get("amount", 0) or 0),
+                transaction_type="withdrawal_refund",
+                reference_type="withdrawal_request",
+                reference_id=withdrawal["id"],
+                idempotency_key=f"withdrawal_refund:{withdrawal['id']}",
+                metadata={"webhook": payload},
+            )
     else:
         status = str(withdraw.get("status") or "processing").lower()
 
-    updated = await update_withdrawal_request(
-        withdrawal["id"],
+    if withdrawal:
+        updated = await update_withdrawal_request(
+            withdrawal["id"],
+            status=status,
+            metadata={**metadata, "last_webhook": payload},
+        )
+        return {"ok": True, "withdrawal": updated}
+
+    updated = await update_operator_settlement(
+        operator_settlement["id"],
         status=status,
         metadata={**metadata, "last_webhook": payload},
     )
-    return {"ok": True, "withdrawal": updated}
+    return {"ok": True, "settlement": updated}
 
 
 @router.get("/admin/operator-report")
@@ -312,6 +332,7 @@ async def operator_report(authorization: str | None = Header(default=None)):
 
 @router.post("/admin/operator-settlements")
 async def operator_settlement(
+    request: Request,
     payload: OperatorSettlementRequest,
     authorization: str | None = Header(default=None),
 ):
@@ -319,12 +340,58 @@ async def operator_settlement(
     if not is_admin(user):
         raise HTTPException(status_code=403, detail="Acesso exclusivo para admin")
 
-    ok, result = await create_operator_settlement(user["id"], payload.amount)
+    provider = payment_provider()
+    if provider not in {"sandbox", "amplopay"}:
+        raise HTTPException(status_code=501, detail=f"Provider {provider} nao suportado")
+    if provider == "amplopay":
+        if not payload.pix_key or not payload.owner_name or not payload.owner_document:
+            raise HTTPException(status_code=422, detail="Pix, titular e documento sao obrigatorios para settlement Amplopay")
+
+    ok, result = await create_operator_settlement(
+        user["id"],
+        payload.amount,
+        pix_key=payload.pix_key,
+        pix_key_type=payload.pix_key_type,
+        owner_name=payload.owner_name,
+        owner_document=payload.owner_document,
+        owner_document_type=payload.owner_document_type,
+    )
     if not ok:
         raise HTTPException(
             status_code=409,
             detail=f"Valor acima do disponivel para settlement. Disponivel: R$ {float(result):.2f}",
         )
+
+    if provider == "amplopay":
+        try:
+            gateway_response = await amplopay.create_pix_transfer(
+                amount=payload.amount,
+                identifier=result["id"],
+                pix_key=payload.pix_key or "",
+                pix_key_type=payload.pix_key_type or "random",
+                owner_name=payload.owner_name or "",
+                owner_document=payload.owner_document or "",
+                owner_document_type=payload.owner_document_type or "cpf",
+                ip=request.client.host if request.client else "127.0.0.1",
+                callback_url=callback_url("/api/wallet/webhooks/amplopay/transfer"),
+            )
+        except amplopay.AmploPayError as exc:
+            await update_operator_settlement(result["id"], status="failed", metadata={"error": str(exc)})
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+        withdraw = gateway_response.get("withdraw") or {}
+        result = await update_operator_settlement(
+            result["id"],
+            status=str(withdraw.get("status") or "processing").lower(),
+            provider_transfer_id=withdraw.get("id"),
+            metadata={
+                **(result.get("metadata") or {}),
+                "mode": "amplopay",
+                "webhook_token": gateway_response.get("webhookToken"),
+                "gateway_response": gateway_response,
+            },
+        ) or result
+
     return {
         "settlement": result,
         "message": "Settlement solicitado. Em producao, essa saida deve ser conciliada com a conta da empresa.",

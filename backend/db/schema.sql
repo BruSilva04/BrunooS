@@ -98,6 +98,12 @@ CREATE TABLE IF NOT EXISTS public.operator_settlements (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
     requested_by text NOT NULL,
     amount double precision NOT NULL,
+    pix_key text,
+    pix_key_type text,
+    owner_name text,
+    owner_document text,
+    owner_document_type text,
+    provider_transfer_id text,
     status text NOT NULL DEFAULT 'requested',
     metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
     paid_at timestamptz,
@@ -107,6 +113,14 @@ CREATE TABLE IF NOT EXISTS public.operator_settlements (
 
 CREATE INDEX IF NOT EXISTS operator_settlements_created_idx
     ON public.operator_settlements (created_at DESC);
+
+ALTER TABLE public.operator_settlements
+    ADD COLUMN IF NOT EXISTS pix_key text,
+    ADD COLUMN IF NOT EXISTS pix_key_type text,
+    ADD COLUMN IF NOT EXISTS owner_name text,
+    ADD COLUMN IF NOT EXISTS owner_document text,
+    ADD COLUMN IF NOT EXISTS owner_document_type text,
+    ADD COLUMN IF NOT EXISTS provider_transfer_id text;
 
 ALTER TABLE public.rounds ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
