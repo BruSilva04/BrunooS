@@ -83,6 +83,9 @@ CREATE INDEX IF NOT EXISTS payment_intents_user_created_idx
     ON public.payment_intents (user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS payment_intents_provider_payment_idx
     ON public.payment_intents (provider, provider_payment_id);
+CREATE UNIQUE INDEX IF NOT EXISTS payment_intents_provider_payment_unique_idx
+    ON public.payment_intents (provider, provider_payment_id)
+    WHERE provider_payment_id IS NOT NULL AND provider_payment_id <> '';
 
 CREATE TABLE IF NOT EXISTS public.withdrawal_requests (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -103,6 +106,9 @@ CREATE TABLE IF NOT EXISTS public.withdrawal_requests (
 
 CREATE INDEX IF NOT EXISTS withdrawal_requests_user_created_idx
     ON public.withdrawal_requests (user_id, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS withdrawal_requests_provider_transfer_unique_idx
+    ON public.withdrawal_requests (provider_transfer_id)
+    WHERE provider_transfer_id IS NOT NULL AND provider_transfer_id <> '';
 
 ALTER TABLE public.withdrawal_requests
     ADD COLUMN IF NOT EXISTS owner_name text,
@@ -128,6 +134,9 @@ CREATE TABLE IF NOT EXISTS public.operator_settlements (
 
 CREATE INDEX IF NOT EXISTS operator_settlements_created_idx
     ON public.operator_settlements (created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS operator_settlements_provider_transfer_unique_idx
+    ON public.operator_settlements (provider_transfer_id)
+    WHERE provider_transfer_id IS NOT NULL AND provider_transfer_id <> '';
 
 ALTER TABLE public.operator_settlements
     ADD COLUMN IF NOT EXISTS pix_key text,
@@ -150,6 +159,131 @@ GRANT ALL ON TABLE public.wallet_transactions TO service_role;
 GRANT ALL ON TABLE public.payment_intents TO service_role;
 GRANT ALL ON TABLE public.withdrawal_requests TO service_role;
 GRANT ALL ON TABLE public.operator_settlements TO service_role;
+
+CREATE OR REPLACE FUNCTION public.adjust_wallet_balance(
+    p_user_id text,
+    p_delta double precision,
+    p_transaction_type text DEFAULT NULL,
+    p_reference_type text DEFAULT NULL,
+    p_reference_id text DEFAULT NULL,
+    p_idempotency_key text DEFAULT NULL,
+    p_metadata jsonb DEFAULT '{}'::jsonb
+)
+RETURNS TABLE(ok boolean, balance double precision, transaction_id uuid)
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    v_user public.users%ROWTYPE;
+    v_existing public.wallet_transactions%ROWTYPE;
+    v_transaction public.wallet_transactions%ROWTYPE;
+    v_new_balance double precision;
+BEGIN
+    IF p_idempotency_key IS NOT NULL THEN
+        SELECT *
+        INTO v_existing
+        FROM public.wallet_transactions
+        WHERE idempotency_key = p_idempotency_key
+        LIMIT 1;
+
+        IF FOUND THEN
+            ok := true;
+            balance := v_existing.balance_after;
+            transaction_id := v_existing.id;
+            RETURN NEXT;
+            RETURN;
+        END IF;
+    END IF;
+
+    SELECT *
+    INTO v_user
+    FROM public.users
+    WHERE id::text = p_user_id
+    FOR UPDATE;
+
+    IF NOT FOUND THEN
+        ok := false;
+        balance := 0;
+        transaction_id := NULL;
+        RETURN NEXT;
+        RETURN;
+    END IF;
+
+    v_new_balance := round((COALESCE(v_user.balance, 0) + p_delta)::numeric, 2)::double precision;
+    IF v_new_balance < 0 THEN
+        ok := false;
+        balance := COALESCE(v_user.balance, 0);
+        transaction_id := NULL;
+        RETURN NEXT;
+        RETURN;
+    END IF;
+
+    UPDATE public.users
+    SET balance = v_new_balance,
+        updated_at = now()
+    WHERE id = v_user.id;
+
+    IF p_transaction_type IS NOT NULL AND round(p_delta::numeric, 2) <> 0 THEN
+        INSERT INTO public.wallet_transactions (
+            user_id,
+            transaction_type,
+            amount,
+            balance_after,
+            status,
+            reference_type,
+            reference_id,
+            idempotency_key,
+            metadata
+        )
+        VALUES (
+            p_user_id,
+            p_transaction_type,
+            round(p_delta::numeric, 2)::double precision,
+            v_new_balance,
+            'completed',
+            p_reference_type,
+            p_reference_id,
+            p_idempotency_key,
+            COALESCE(p_metadata, '{}'::jsonb)
+        )
+        RETURNING * INTO v_transaction;
+    END IF;
+
+    ok := true;
+    balance := v_new_balance;
+    transaction_id := v_transaction.id;
+    RETURN NEXT;
+EXCEPTION
+    WHEN unique_violation THEN
+        IF p_idempotency_key IS NOT NULL THEN
+            SELECT *
+            INTO v_existing
+            FROM public.wallet_transactions
+            WHERE idempotency_key = p_idempotency_key
+            LIMIT 1;
+
+            IF FOUND THEN
+                ok := true;
+                balance := v_existing.balance_after;
+                transaction_id := v_existing.id;
+                RETURN NEXT;
+                RETURN;
+            END IF;
+        END IF;
+        RAISE;
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.adjust_wallet_balance(
+    text,
+    double precision,
+    text,
+    text,
+    text,
+    text,
+    jsonb
+) TO service_role;
 
 UPDATE public.users AS u
 SET balance = GREATEST(0, COALESCE((

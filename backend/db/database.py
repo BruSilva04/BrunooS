@@ -68,12 +68,12 @@ async def init_db():
 
 async def ensure_admin_user():
     username = os.getenv("ADMIN_USERNAME", "admin")
-    password = os.getenv("ADMIN_PASSWORD", "@dm1n_")
+    password = os.getenv("ADMIN_PASSWORD")
     create_payload = {
         "username": username,
         "email": os.getenv("ADMIN_EMAIL", "admin@sereiadotesouro.local"),
         "phone": os.getenv("ADMIN_PHONE", "+5500000000000"),
-        "password_hash": hash_password(password),
+        "password_hash": hash_password(password or "@dm1n_"),
         "role": "admin",
         "permissions": {"admin": True, "play": True, "wallet": True, "users": True},
         "balance": 100000.0,
@@ -81,8 +81,10 @@ async def ensure_admin_user():
     update_payload = {
         key: value
         for key, value in create_payload.items()
-        if key not in {"balance"}
+        if key not in {"balance", "password_hash"}
     }
+    if password:
+        update_payload["password_hash"] = create_payload["password_hash"]
 
     existing = await get_user_by_username(username)
 
@@ -267,6 +269,40 @@ async def get_wallet_transaction_by_idempotency(idempotency_key: str) -> dict[st
     return response.data[0] if response.data else None
 
 
+def require_wallet_ledger() -> bool:
+    return os.getenv("REQUIRE_WALLET_LEDGER", "false").lower() == "true"
+
+
+async def adjust_user_balance_rpc(
+    user_id: str,
+    delta: float,
+    transaction_type: str | None = None,
+    reference_type: str | None = None,
+    reference_id: str | None = None,
+    idempotency_key: str | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> tuple[bool, float] | None:
+    params = {
+        "p_user_id": user_id,
+        "p_delta": round(float(delta), 2),
+        "p_transaction_type": transaction_type,
+        "p_reference_type": reference_type,
+        "p_reference_id": reference_id,
+        "p_idempotency_key": idempotency_key,
+        "p_metadata": metadata or {},
+    }
+
+    def call_rpc():
+        return get_supabase_client().rpc("adjust_wallet_balance", params).execute()
+
+    response = await anyio.to_thread.run_sync(call_rpc)
+    rows = response.data or []
+    result = rows[0] if isinstance(rows, list) and rows else rows if isinstance(rows, dict) else None
+    if not result:
+        return None
+    return bool(result.get("ok")), float(result.get("balance") or 0)
+
+
 async def adjust_user_balance(
     user_id: str,
     delta: float,
@@ -276,6 +312,22 @@ async def adjust_user_balance(
     idempotency_key: str | None = None,
     metadata: dict[str, Any] | None = None,
 ) -> tuple[bool, float]:
+    try:
+        rpc_result = await adjust_user_balance_rpc(
+            user_id=user_id,
+            delta=delta,
+            transaction_type=transaction_type,
+            reference_type=reference_type,
+            reference_id=reference_id,
+            idempotency_key=idempotency_key,
+            metadata=metadata,
+        )
+        if rpc_result is not None:
+            return rpc_result
+    except Exception:
+        if require_wallet_ledger():
+            raise
+
     user = await get_user_by_id(user_id)
     if not user:
         return False, 0.0
@@ -284,7 +336,7 @@ async def adjust_user_balance(
         try:
             existing_transaction = await get_wallet_transaction_by_idempotency(idempotency_key)
         except Exception:
-            if os.getenv("REQUIRE_WALLET_LEDGER", "false").lower() == "true":
+            if require_wallet_ledger():
                 raise
             existing_transaction = None
 
@@ -320,7 +372,7 @@ async def adjust_user_balance(
                 metadata=metadata,
             )
         except Exception:
-            if os.getenv("REQUIRE_WALLET_LEDGER", "false").lower() == "true":
+            if require_wallet_ledger():
                 raise
 
     return True, new_balance

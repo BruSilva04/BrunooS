@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Header, HTTPException
+import time
+
+from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from db.database import (
@@ -12,6 +14,7 @@ from db.database import (
 from services.auth import create_session_token, hash_password, verify_password, verify_session_token
 
 router = APIRouter(prefix="/api", tags=["auth"])
+RATE_LIMIT_BUCKETS: dict[str, list[float]] = {}
 
 
 class RegisterRequest(BaseModel):
@@ -27,6 +30,29 @@ class RegisterRequest(BaseModel):
 class LoginRequest(BaseModel):
     username: str = Field(min_length=3, max_length=64)
     password: str = Field(min_length=1, max_length=128)
+
+
+def client_ip(request: Request) -> str:
+    forwarded_for = request.headers.get("x-forwarded-for", "")
+    if forwarded_for:
+        return forwarded_for.split(",", 1)[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def check_rate_limit(key: str, limit: int, window_seconds: int) -> None:
+    now = time.time()
+    bucket = [seen_at for seen_at in RATE_LIMIT_BUCKETS.get(key, []) if now - seen_at < window_seconds]
+    RATE_LIMIT_BUCKETS[key] = bucket
+    if len(bucket) >= limit:
+        raise HTTPException(status_code=429, detail="Muitas tentativas. Aguarde alguns minutos e tente novamente.")
+
+
+def record_rate_limit_hit(key: str) -> None:
+    RATE_LIMIT_BUCKETS.setdefault(key, []).append(time.time())
+
+
+def clear_rate_limit(key: str) -> None:
+    RATE_LIMIT_BUCKETS.pop(key, None)
 
 
 def bearer_token(authorization: str | None) -> str | None:
@@ -79,7 +105,11 @@ def db_unavailable(exc: Exception) -> HTTPException:
 
 
 @router.post("/auth/register")
-async def register(payload: RegisterRequest):
+async def register(payload: RegisterRequest, request: Request):
+    register_key = f"register:{client_ip(request)}"
+    check_rate_limit(register_key, limit=5, window_seconds=10 * 60)
+    record_rate_limit_hit(register_key)
+
     username = payload.username.strip()
     email = payload.email.lower().strip()
     legal_name = payload.legal_name.strip()
@@ -118,15 +148,21 @@ async def register(payload: RegisterRequest):
 
 
 @router.post("/auth/login")
-async def login(payload: LoginRequest):
+async def login(payload: LoginRequest, request: Request):
+    username = payload.username.strip()
+    login_key = f"login:{client_ip(request)}:{username.lower()}"
+    check_rate_limit(login_key, limit=8, window_seconds=10 * 60)
+
     try:
-        user = await get_user_by_username(payload.username.strip())
+        user = await get_user_by_username(username)
     except Exception as exc:
         raise db_unavailable(exc) from exc
 
     if not user or not verify_password(payload.password, user.get("password_hash", "")):
+        record_rate_limit_hit(login_key)
         raise HTTPException(status_code=401, detail="Usuario ou senha invalido")
 
+    clear_rate_limit(login_key)
     return {"token": create_session_token(user), "user": public_user(user)}
 
 

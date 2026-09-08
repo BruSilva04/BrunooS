@@ -51,6 +51,18 @@ app.include_router(game.router)
 app.include_router(auth.router)
 app.include_router(wallet.router)
 
+
+@app.middleware("http")
+async def security_headers(request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    if request.url.path.startswith(("/api/auth", "/api/wallet")):
+        response.headers.setdefault("Cache-Control", "no-store")
+    return response
+
 @app.get("/health")
 async def health():
     return {"status": "ok", "game": "Sereia do Tesouro"}

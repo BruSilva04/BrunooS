@@ -94,26 +94,11 @@ async def game_websocket(websocket: WebSocket):
                     })
                     continue
 
-                round_id = str(uuid.uuid4())
-                charged, balance = await adjust_user_balance(
-                    user["id"],
-                    -bet,
-                    transaction_type="bet",
-                    reference_type="round",
-                    reference_id=round_id,
-                    idempotency_key=f"bet:{round_id}",
-                )
-                if not charged:
-                    await websocket.send_json({
-                        "type": "error",
-                        "message": "Saldo insuficiente"
-                    })
-                    continue
-
                 server_seed = generate_server_seed()
+                round_id = str(uuid.uuid4())
                 seed_hash = hash_seed(server_seed)
                 crash_point = generate_crash_point(server_seed, round_id)
-                
+
                 active_round = {
                     "round_id": round_id,
                     "user_id": user["id"],
@@ -124,8 +109,7 @@ async def game_websocket(websocket: WebSocket):
                     "started_at": time.monotonic(),
                     "status": "active"
                 }
-                
-                # Save to DB
+
                 await save_round({
                     "round_id": round_id,
                     "user_id": user["id"],
@@ -134,6 +118,32 @@ async def game_websocket(websocket: WebSocket):
                     "server_seed": server_seed,
                     "server_seed_hash": seed_hash
                 })
+
+                try:
+                    charged, balance = await adjust_user_balance(
+                        user["id"],
+                        -bet,
+                        transaction_type="bet",
+                        reference_type="round",
+                        reference_id=round_id,
+                        idempotency_key=f"bet:{round_id}",
+                    )
+                except Exception:
+                    await update_round(round_id, payout=0, status="canceled")
+                    active_round = None
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "Falha ao reservar saldo da rodada"
+                    })
+                    continue
+                if not charged:
+                    await update_round(round_id, payout=0, status="canceled")
+                    active_round = None
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "Saldo insuficiente"
+                    })
+                    continue
                 
                 await websocket.send_json({
                     "type": "round_started",

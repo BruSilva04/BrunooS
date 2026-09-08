@@ -1,4 +1,6 @@
 import os
+import hashlib
+import hmac
 
 from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -26,6 +28,12 @@ from services import amplopay
 from services.auth import verify_session_token
 
 router = APIRouter(prefix="/api/wallet", tags=["wallet"])
+
+PAYMENT_TERMINAL_EVENTS = {
+    "TRANSACTION_CANCELED",
+    "TRANSACTION_REFUNDED",
+    "TRANSACTION_CHARGED_BACK",
+}
 
 
 class DepositIntentRequest(BaseModel):
@@ -82,6 +90,10 @@ def payment_provider() -> str:
     return os.getenv("PAYMENT_PROVIDER", "sandbox").strip().lower() or "sandbox"
 
 
+def require_amplopay_webhook_token() -> bool:
+    return os.getenv("AMPLOPAY_REQUIRE_WEBHOOK_TOKEN", "true").lower() != "false"
+
+
 def callback_url(path: str) -> str:
     base_url = (
         os.getenv("BACKEND_PUBLIC_URL")
@@ -95,6 +107,97 @@ def callback_url(path: str) -> str:
 
 def only_digits(value: str | None) -> str:
     return "".join(char for char in str(value or "") if char.isdigit())
+
+
+def redacted_payload(value):
+    sensitive_keys = {
+        "document",
+        "cpf",
+        "cnpj",
+        "taxid",
+        "tax_id",
+        "secret",
+        "secretkey",
+        "secret_key",
+        "token",
+        "webhooktoken",
+        "webhook_token",
+        "x-secret-key",
+    }
+    if isinstance(value, dict):
+        clean = {}
+        for key, item in value.items():
+            normalized = "".join(char for char in str(key).lower() if char.isalnum() or char == "_")
+            if normalized in sensitive_keys:
+                clean[key] = "***redacted***"
+            else:
+                clean[key] = redacted_payload(item)
+        return clean
+    if isinstance(value, list):
+        return [redacted_payload(item) for item in value]
+    return value
+
+
+def first_number(*values) -> float | None:
+    for value in values:
+        try:
+            if value is None or value == "":
+                continue
+            return float(value)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def webhook_token_hash(token: str | None) -> str | None:
+    if not token:
+        return None
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def validate_webhook_token(metadata: dict, received_token: str | None) -> None:
+    expected_hash = metadata.get("webhook_token_hash")
+    if expected_hash and received_token:
+        if not hmac.compare_digest(webhook_token_hash(received_token) or "", expected_hash):
+            raise HTTPException(status_code=401, detail="Token de webhook invalido")
+        return
+
+    expected_token = metadata.get("webhook_token")
+    if expected_token:
+        if received_token != expected_token:
+            raise HTTPException(status_code=401, detail="Token de webhook invalido")
+        return
+    if require_amplopay_webhook_token():
+        raise HTTPException(status_code=401, detail="Webhook sem token esperado salvo")
+
+
+def validate_payment_amount(intent: dict, transaction: dict, payload: dict) -> None:
+    amount = first_number(
+        transaction.get("amount"),
+        transaction.get("value"),
+        transaction.get("total"),
+        transaction.get("totalAmount"),
+        payload.get("amount"),
+    )
+    if amount is None:
+        return
+    expected = round(float(intent.get("amount", 0) or 0), 2)
+    if abs(round(amount, 2) - expected) > 0.01:
+        raise HTTPException(status_code=409, detail="Valor do webhook nao confere com o deposito")
+
+
+def validate_transfer_amount(record: dict, withdraw: dict, payload: dict) -> None:
+    amount = first_number(
+        withdraw.get("amount"),
+        withdraw.get("value"),
+        withdraw.get("total"),
+        payload.get("amount"),
+    )
+    if amount is None:
+        return
+    expected = round(float(record.get("amount", 0) or 0), 2)
+    if abs(round(amount, 2) - expected) > 0.01:
+        raise HTTPException(status_code=409, detail="Valor do webhook nao confere com a transferencia")
 
 
 async def deposit_customer(user: dict, payload: DepositIntentRequest) -> dict:
@@ -175,7 +278,7 @@ async def deposit_intent(
             pix_copy_paste=pix.get("code"),
             metadata={
                 "mode": "amplopay",
-                "webhook_token": gateway_response.get("webhookToken"),
+                "webhook_token_hash": webhook_token_hash(gateway_response.get("webhookToken")),
                 "gateway_status": gateway_response.get("status"),
                 "customer": {
                     "name": customer["name"],
@@ -184,7 +287,7 @@ async def deposit_intent(
                     "document_last4": customer["document"][-4:],
                     "document_type": customer["document_type"],
                 },
-                "gateway_response": gateway_response,
+                "gateway_response": redacted_payload(gateway_response),
             },
         ) or intent
 
@@ -277,8 +380,8 @@ async def withdrawal_request(
             metadata={
                 **(result.get("metadata") or {}),
                 "mode": "amplopay",
-                "webhook_token": gateway_response.get("webhookToken"),
-                "gateway_response": gateway_response,
+                "webhook_token_hash": webhook_token_hash(gateway_response.get("webhookToken")),
+                "gateway_response": redacted_payload(gateway_response),
             },
         ) or result
 
@@ -303,17 +406,23 @@ async def amplopay_payment_webhook(request: Request):
         raise HTTPException(status_code=404, detail="Deposito nao encontrado")
 
     metadata = intent.get("metadata") or {}
-    expected_token = metadata.get("webhook_token")
-    if expected_token and token != expected_token:
-        raise HTTPException(status_code=401, detail="Token de webhook invalido")
+    validate_webhook_token(metadata, token)
 
     if event == "TRANSACTION_PAID":
+        validate_payment_amount(intent, transaction, payload)
         updated = await confirm_payment_intent(intent["id"], "amplopay_webhook")
-    elif event in {"TRANSACTION_CANCELED", "TRANSACTION_REFUNDED", "TRANSACTION_CHARGED_BACK"}:
+    elif event in PAYMENT_TERMINAL_EVENTS:
         status = event.replace("TRANSACTION_", "").lower()
-        updated = await update_payment_intent(intent["id"], status=status, metadata={**metadata, "last_webhook": payload})
+        updated = await update_payment_intent(
+            intent["id"],
+            status=status,
+            metadata={**metadata, "last_webhook": redacted_payload(payload)},
+        )
     else:
-        updated = await update_payment_intent(intent["id"], metadata={**metadata, "last_webhook": payload})
+        updated = await update_payment_intent(
+            intent["id"],
+            metadata={**metadata, "last_webhook": redacted_payload(payload)},
+        )
 
     return {"ok": True, "intent": updated}
 
@@ -337,9 +446,8 @@ async def amplopay_transfer_webhook(request: Request):
 
     record = withdrawal or operator_settlement
     metadata = record.get("metadata") or {}
-    expected_token = metadata.get("webhook_token")
-    if expected_token and token != expected_token:
-        raise HTTPException(status_code=401, detail="Token de webhook invalido")
+    validate_webhook_token(metadata, token)
+    validate_transfer_amount(record, withdraw, payload)
 
     if event == "TRANSFER_COMPLETED":
         status = "paid"
@@ -353,7 +461,7 @@ async def amplopay_transfer_webhook(request: Request):
                 reference_type="withdrawal_request",
                 reference_id=withdrawal["id"],
                 idempotency_key=f"withdrawal_refund:{withdrawal['id']}",
-                metadata={"webhook": payload},
+                metadata={"webhook": redacted_payload(payload)},
             )
     else:
         status = str(withdraw.get("status") or "processing").lower()
@@ -362,14 +470,14 @@ async def amplopay_transfer_webhook(request: Request):
         updated = await update_withdrawal_request(
             withdrawal["id"],
             status=status,
-            metadata={**metadata, "last_webhook": payload},
+            metadata={**metadata, "last_webhook": redacted_payload(payload)},
         )
         return {"ok": True, "withdrawal": updated}
 
     updated = await update_operator_settlement(
         operator_settlement["id"],
         status=status,
-        metadata={**metadata, "last_webhook": payload},
+        metadata={**metadata, "last_webhook": redacted_payload(payload)},
     )
     return {"ok": True, "settlement": updated}
 
@@ -439,8 +547,8 @@ async def operator_settlement(
             metadata={
                 **(result.get("metadata") or {}),
                 "mode": "amplopay",
-                "webhook_token": gateway_response.get("webhookToken"),
-                "gateway_response": gateway_response,
+                "webhook_token_hash": webhook_token_hash(gateway_response.get("webhookToken")),
+                "gateway_response": redacted_payload(gateway_response),
             },
         ) or result
 
