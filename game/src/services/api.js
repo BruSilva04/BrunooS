@@ -2,27 +2,82 @@ import { API_URL } from '../config.js';
 
 const TOKEN_KEY = 'sereia_auth_token';
 const USER_KEY = 'sereia_auth_user';
+const SESSION_STARTED_KEY = 'sereia_auth_started_at';
+const SESSION_LAST_SEEN_KEY = 'sereia_auth_last_seen_at';
+const SESSION_IDLE_MS = 30 * 60 * 1000;
+const SESSION_MAX_AGE_MS = 4 * 60 * 60 * 1000;
 
-export function getAuthToken() {
-  return localStorage.getItem(TOKEN_KEY);
+function sessionStore() {
+  return window.sessionStorage;
+}
+
+function clearLegacyStorage() {
+  window.localStorage.removeItem(TOKEN_KEY);
+  window.localStorage.removeItem(USER_KEY);
+}
+
+function isSessionExpired() {
+  const now = Date.now();
+  const startedAt = Number(sessionStore().getItem(SESSION_STARTED_KEY) || 0);
+  const lastSeenAt = Number(sessionStore().getItem(SESSION_LAST_SEEN_KEY) || 0);
+  if (!startedAt || !lastSeenAt) return true;
+  return now - startedAt > SESSION_MAX_AGE_MS || now - lastSeenAt > SESSION_IDLE_MS;
+}
+
+function touchSession() {
+  sessionStore().setItem(SESSION_LAST_SEEN_KEY, String(Date.now()));
+}
+
+export function getAuthToken({ touch = true } = {}) {
+  clearLegacyStorage();
+  const token = sessionStore().getItem(TOKEN_KEY);
+  if (!token) return null;
+  if (isSessionExpired()) {
+    clearSession();
+    return null;
+  }
+  if (touch) touchSession();
+  return token;
+}
+
+export function hasValidSession() {
+  return !!getAuthToken({ touch: false });
+}
+
+export function markSessionActivity() {
+  if (getAuthToken({ touch: false })) {
+    touchSession();
+  }
 }
 
 export function getStoredUser() {
+  clearLegacyStorage();
+  if (isSessionExpired()) {
+    clearSession();
+    return null;
+  }
   try {
-    return JSON.parse(localStorage.getItem(USER_KEY) || 'null');
+    return JSON.parse(sessionStore().getItem(USER_KEY) || 'null');
   } catch {
     return null;
   }
 }
 
 export function setSession(token, user) {
-  localStorage.setItem(TOKEN_KEY, token);
-  localStorage.setItem(USER_KEY, JSON.stringify(user));
+  clearLegacyStorage();
+  const now = String(Date.now());
+  sessionStore().setItem(TOKEN_KEY, token);
+  sessionStore().setItem(USER_KEY, JSON.stringify(user));
+  sessionStore().setItem(SESSION_STARTED_KEY, now);
+  sessionStore().setItem(SESSION_LAST_SEEN_KEY, now);
 }
 
 export function clearSession() {
-  localStorage.removeItem(TOKEN_KEY);
-  localStorage.removeItem(USER_KEY);
+  sessionStore().removeItem(TOKEN_KEY);
+  sessionStore().removeItem(USER_KEY);
+  sessionStore().removeItem(SESSION_STARTED_KEY);
+  sessionStore().removeItem(SESSION_LAST_SEEN_KEY);
+  clearLegacyStorage();
 }
 
 async function request(path, options = {}) {

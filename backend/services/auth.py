@@ -8,7 +8,7 @@ import time
 from typing import Any
 
 PBKDF2_ITERATIONS = 210_000
-TOKEN_TTL_SECONDS = 60 * 60 * 24 * 7
+TOKEN_TTL_SECONDS = int(os.getenv("AUTH_TOKEN_TTL_SECONDS", str(60 * 60 * 4)))
 
 
 def _b64url_encode(raw: bytes) -> str:

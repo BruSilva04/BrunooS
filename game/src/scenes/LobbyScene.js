@@ -645,6 +645,7 @@ export default class LobbyScene extends Phaser.Scene {
         .sereia-lobby-root {
           position: fixed;
           inset: 0;
+          height: var(--app-height, 100dvh);
           z-index: 18;
           color: #fff7dc;
           font-family: Arial, Helvetica, sans-serif;
@@ -658,7 +659,7 @@ export default class LobbyScene extends Phaser.Scene {
         .sereia-lobby-root * { box-sizing: border-box; }
         .lobby-shell {
           width: min(430px, 100vw);
-          min-height: 100dvh;
+          min-height: var(--app-height, 100dvh);
           margin: 0 auto;
           padding: max(14px, env(safe-area-inset-top)) 14px calc(62px + env(safe-area-inset-bottom));
           pointer-events: auto;
@@ -1294,6 +1295,7 @@ export default class LobbyScene extends Phaser.Scene {
         .modal-backdrop {
           position: fixed;
           inset: 0;
+          min-height: var(--app-height, 100dvh);
           z-index: 28;
           display: grid;
           place-items: center;

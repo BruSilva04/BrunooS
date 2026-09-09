@@ -46,6 +46,7 @@ export default class AuthScene extends Phaser.Scene {
         .sereia-auth-root {
           position: fixed;
           inset: 0;
+          height: var(--app-height, 100dvh);
           z-index: 20;
           display: grid;
           place-items: center;
@@ -58,7 +59,7 @@ export default class AuthScene extends Phaser.Scene {
         }
         .sereia-auth-card {
           width: min(366px, calc(100vw - 22px));
-          max-height: calc(100dvh - 22px);
+          max-height: calc(var(--app-height, 100dvh) - 22px);
           overflow-y: auto;
           border: 1px solid rgba(242, 201, 76, 0.58);
           background:

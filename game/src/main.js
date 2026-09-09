@@ -5,8 +5,9 @@ import AuthScene from './scenes/AuthScene.js';
 import LobbyScene from './scenes/LobbyScene.js';
 import MenuScene from './scenes/MenuScene.js';
 import GameScene from './scenes/GameScene.js';
+import { clearSession, hasValidSession, markSessionActivity } from './services/api.js';
 
-new Phaser.Game({
+const game = new Phaser.Game({
   type: Phaser.AUTO,
   width: W,
   height: H,
@@ -27,3 +28,40 @@ new Phaser.Game({
   },
   fps: { target: 60 }
 });
+
+function refreshScale() {
+  if (game?.scale) {
+    game.scale.refresh();
+  }
+}
+
+window.addEventListener('resize', refreshScale, { passive: true });
+window.addEventListener('orientationchange', () => {
+  window.setTimeout(refreshScale, 140);
+}, { passive: true });
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', refreshScale, { passive: true });
+  window.visualViewport.addEventListener('scroll', refreshScale, { passive: true });
+}
+
+function forceLoginWhenSessionExpires() {
+  if (game.scene.isActive('Auth')) return;
+  if (hasValidSession()) return;
+
+  clearSession();
+  ['Game', 'Menu', 'Lobby'].forEach((key) => {
+    if (game.scene.isActive(key)) game.scene.stop(key);
+  });
+  game.scene.start('Auth');
+}
+
+['pointerdown', 'touchstart', 'keydown'].forEach((eventName) => {
+  window.addEventListener(eventName, markSessionActivity, { passive: true });
+});
+
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) forceLoginWhenSessionExpires();
+});
+window.addEventListener('focus', forceLoginWhenSessionExpires);
+window.addEventListener('pageshow', forceLoginWhenSessionExpires);
+window.setInterval(forceLoginWhenSessionExpires, 60 * 1000);
