@@ -27,9 +27,34 @@ export default class GameScene extends Phaser.Scene {
     this.resultShown = false;
     this.betDebitedByServer = false;
     this.lossReason = 'crash';
+    this.roundReady = false;
+    this.gameplayStarted = false;
+    this.startFailureShown = false;
+    this._startTimeout = null;
+    this._statusText = null;
+    this._tObs = null;
+    this._tGem = null;
+    this._tBub = null;
+    this._tMult = null;
   }
 
   create() {
+    if (document.activeElement && document.activeElement.blur) {
+      document.activeElement.blur();
+    }
+    if (window.sereiaSyncViewport) {
+      window.sereiaSyncViewport();
+    }
+    this.scale.refresh();
+    [120, 360, 700].forEach((delay) => {
+      this.time.delayedCall(delay, () => {
+        if (window.sereiaSyncViewport) {
+          window.sereiaSyncViewport();
+        }
+        this.scale.refresh();
+      });
+    });
+
     this.sounds = new SoundManager();
     this.particles = new ParticleEffects(this);
 
@@ -39,32 +64,76 @@ export default class GameScene extends Phaser.Scene {
 
     this.merm = new Mermaid(this);
 
-    this._tObs  = this.time.addEvent({ delay: OBS_DELAY_START, callback: this._spawnObs,  callbackScope: this, loop: true });
-    this._tGem  = this.time.addEvent({ delay: GEM_DELAY,      callback: this._spawnGem,  callbackScope: this, loop: true });
-    this._tBub  = this.time.addEvent({ delay: 260, callback: this._spawnBub,  callbackScope: this, loop: true });
-    this._tMult = this.time.addEvent({ delay: 100, callback: this._tickMult,  callbackScope: this, loop: true });
-
     this.hud = new HUD(this, this.bet);
     this.hud.onCashOut(() => {
       if (!this.dead && !this.cashed) this._cashOut();
     });
 
     this.input.on('pointerdown', (p) => {
-      if (!this.dead && !this.cashed && p.y < H - 90) {
+      if (this.roundReady && !this.dead && !this.cashed && p.y < H - 90) {
         this.merm.flap();
         this.sounds.playSwim();
       }
     });
     this._space = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
 
+    this._showStatus('CONECTANDO...');
     this._connectWS();
+    this._startTimeout = this.time.delayedCall(9000, () => {
+      if (!this.roundId && !this.resultShown) {
+        this._handleServerError('Conexao com o jogo demorou demais. Tente novamente.');
+      }
+    });
+
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this._cleanup());
+  }
+
+  _showStatus(message) {
+    if (this._statusText) {
+      this._statusText.setText(message);
+      return;
+    }
+    this._statusText = this.add.text(W / 2, H / 2, message, {
+      fontSize: '18px',
+      fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#ffe08a',
+      stroke: '#19070c',
+      strokeThickness: 4,
+    }).setOrigin(0.5).setDepth(50);
+  }
+
+  _clearStatus() {
+    if (this._statusText) {
+      this._statusText.destroy();
+      this._statusText = null;
+    }
+  }
+
+  _beginGameplay() {
+    if (this.gameplayStarted) return;
+    this.gameplayStarted = true;
+    this.roundReady = true;
+    this._clearStatus();
+
+    this._tObs  = this.time.addEvent({ delay: OBS_DELAY_START, callback: this._spawnObs,  callbackScope: this, loop: true });
+    this._tGem  = this.time.addEvent({ delay: GEM_DELAY,      callback: this._spawnGem,  callbackScope: this, loop: true });
+    this._tBub  = this.time.addEvent({ delay: 260, callback: this._spawnBub,  callbackScope: this, loop: true });
+    this._tMult = this.time.addEvent({ delay: 100, callback: this._tickMult,  callbackScope: this, loop: true });
+
+    this.merm.flap();
   }
   
   _connectWS() {
     try {
       this.ws = new WebSocket(WS_URL);
       this.ws.onopen = () => {
-        this.ws.send(JSON.stringify({ action: 'start_round', bet: this.bet, token: getAuthToken() }));
+        const token = getAuthToken();
+        if (!token) {
+          this._handleServerError('Sessao invalida');
+          return;
+        }
+        this._showStatus('RESERVANDO APOSTA...');
+        this.ws.send(JSON.stringify({ action: 'start_round', bet: this.bet, token }));
       };
       this.ws.onmessage = (event) => {
         const data = JSON.parse(event.data);
@@ -72,6 +141,11 @@ export default class GameScene extends Phaser.Scene {
           this.roundId = data.round_id;
           this.betDebitedByServer = true;
           if (Number.isFinite(data.balance)) state.balance = data.balance;
+          if (this._startTimeout) {
+            this._startTimeout.destroy();
+            this._startTimeout = null;
+          }
+          this._beginGameplay();
         } else if (data.type === 'cash_out_result') {
           if (data.success) {
             this._applyCashOutResult(data.payout, data.multiplier, data.balance);
@@ -87,9 +161,22 @@ export default class GameScene extends Phaser.Scene {
           this._handleServerError(data.message);
         }
       };
-      this.ws.onerror = () => {};
-      this.ws.onclose = () => {};
-    } catch (e) {}
+      this.ws.onerror = () => {
+        if (!this.resultShown && !this.roundId) {
+          this._handleServerError('Falha na conexao WebSocket do jogo');
+        }
+      };
+      this.ws.onclose = () => {
+        if (this.resultShown) return;
+        if (!this.roundId) {
+          this._handleServerError('Conexao com o jogo fechada antes de iniciar');
+        } else if (!this.dead && !this.cashed) {
+          this._applyLossResult(this.mult, 'connection');
+        }
+      };
+    } catch (e) {
+      this._handleServerError('Nao foi possivel abrir o WebSocket do jogo');
+    }
   }
 
   _drawBg(depth) {
@@ -211,10 +298,7 @@ export default class GameScene extends Phaser.Scene {
         clearSession();
         this.scene.start('Auth');
       } else {
-        this.scene.start('Lobby', {
-          balance: state.balance,
-          notice: message || 'Nao foi possivel iniciar a rodada. Tente novamente.',
-        });
+        this._showStartFailure(message || 'Nao foi possivel iniciar a rodada. Tente novamente.');
       }
       return;
     }
@@ -222,6 +306,47 @@ export default class GameScene extends Phaser.Scene {
     if ((this.dead || this.cashed) && !this.resultShown) {
       this._applyLossResult(this.mult, 'connection');
     }
+  }
+
+  _showStartFailure(message) {
+    if (this.startFailureShown) return;
+    this.startFailureShown = true;
+    this.resultShown = true;
+    this._clearStatus();
+
+    this.add.rectangle(0, 0, W, H, 0x000000, 0.56).setOrigin(0).setDepth(80);
+    const panel = this.add.graphics().setDepth(81);
+    const px = 28;
+    const py = H / 2 - 108;
+    const pw = W - 56;
+    const ph = 216;
+    panel.fillStyle(0x19070c, 0.97);
+    panel.fillRoundedRect(px, py, pw, ph, 8);
+    panel.lineStyle(2, 0xff9da5, 0.62);
+    panel.strokeRoundedRect(px, py, pw, ph, 8);
+
+    this.add.text(W / 2, py + 44, 'CONEXAO DO JOGO', {
+      fontSize: '18px',
+      fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#ffe08a',
+    }).setOrigin(0.5).setDepth(82);
+    this.add.text(W / 2, py + 96, message, {
+      fontSize: '13px',
+      fontFamily: 'Arial, sans-serif',
+      color: '#ffc0c7',
+      align: 'center',
+      wordWrap: { width: pw - 38 },
+      lineSpacing: 5,
+    }).setOrigin(0.5).setDepth(82);
+    this.add.text(W / 2, py + 170, 'TOQUE PARA VOLTAR', {
+      fontSize: '12px',
+      fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#8eb8c7',
+    }).setOrigin(0.5).setDepth(82);
+
+    this.input.once('pointerdown', () => {
+      this.scene.start('Lobby', { balance: state.balance, notice: message });
+    });
   }
 
   _applyCashOutResult(payout, multiplier = this.mult, balance = null) {
@@ -250,8 +375,28 @@ export default class GameScene extends Phaser.Scene {
   }
 
   _stopTimers() {
-    [this._tObs, this._tGem, this._tBub, this._tMult].forEach(t => {
- if (t) t.destroy(); });
+    [this._tObs, this._tGem, this._tBub, this._tMult, this._startTimeout].forEach((timer) => {
+      if (timer) timer.destroy();
+    });
+    this._tObs = null;
+    this._tGem = null;
+    this._tBub = null;
+    this._tMult = null;
+    this._startTimeout = null;
+  }
+
+  _cleanup() {
+    this._stopTimers();
+    if (this.ws) {
+      this.ws.onopen = null;
+      this.ws.onmessage = null;
+      this.ws.onerror = null;
+      this.ws.onclose = null;
+      if (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING) {
+        this.ws.close();
+      }
+      this.ws = null;
+    }
   }
 
   _showResult(won, amount, reason = 'crash') {
@@ -264,14 +409,14 @@ export default class GameScene extends Phaser.Scene {
   }
 
   update(time, delta) {
-    if (this.dead || this.cashed) return;
+    if (this.dead || this.cashed || !this.roundReady) return;
     const dt = delta / 1000;
 
     this.speed = 170 + (this.mult - 1) * 58;
 
     this._drawBg(-this.mult - 1);
 
-    if (Phaser.Input.Keyboard.JustDown(this._space)) {
+    if (this.roundReady && Phaser.Input.Keyboard.JustDown(this._space)) {
       this.merm.flap();
       this.sounds.playSwim();
     }

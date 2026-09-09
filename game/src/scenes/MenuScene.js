@@ -238,6 +238,13 @@ export default class MenuScene extends Phaser.Scene {
         this.scene.start('Lobby', { tab: 'promo' });
         return;
       }
+      if (document.activeElement && document.activeElement.blur) {
+        document.activeElement.blur();
+      }
+      if (window.sereiaSyncViewport) {
+        window.sereiaSyncViewport();
+      }
+      this.scale.refresh();
       this.scene.start('Game', { bet: this.bet });
     });
 

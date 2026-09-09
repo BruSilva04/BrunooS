@@ -30,6 +30,9 @@ const game = new Phaser.Game({
 });
 
 function refreshScale() {
+  if (window.sereiaSyncViewport) {
+    window.sereiaSyncViewport();
+  }
   if (game?.scale) {
     game.scale.refresh();
   }

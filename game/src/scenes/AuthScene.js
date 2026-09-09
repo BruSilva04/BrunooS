@@ -293,6 +293,12 @@ export default class AuthScene extends Phaser.Scene {
         });
 
       setSession(response.token, response.user);
+      if (document.activeElement && document.activeElement.blur) {
+        document.activeElement.blur();
+      }
+      if (window.sereiaSyncViewport) {
+        window.sereiaSyncViewport();
+      }
       this.scene.start('Lobby');
     } catch (error) {
       this._renderAuthPanel(error.message || 'Nao foi possivel acessar');

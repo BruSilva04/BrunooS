@@ -29,6 +29,7 @@
     #game {
       width: 100vw;
       height: var(--app-height, 100dvh);
+      min-height: 100svh;
       max-width: 100vw;
       max-height: var(--app-height, 100dvh);
       display: flex;
@@ -46,11 +47,20 @@
   <script>
     function syncAppViewport() {
       var viewport = window.visualViewport || window;
-      var height = viewport.height || window.innerHeight;
-      var width = viewport.width || window.innerWidth;
+      var height = Math.max(
+        viewport.height || 0,
+        window.innerHeight || 0,
+        document.documentElement.clientHeight || 0
+      );
+      var width = Math.max(
+        viewport.width || 0,
+        window.innerWidth || 0,
+        document.documentElement.clientWidth || 0
+      );
       document.documentElement.style.setProperty('--app-height', height + 'px');
       document.documentElement.style.setProperty('--app-width', width + 'px');
     }
+    window.sereiaSyncViewport = syncAppViewport;
     syncAppViewport();
     window.addEventListener('resize', syncAppViewport, { passive: true });
     window.addEventListener('orientationchange', function () {
