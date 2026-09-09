@@ -18,7 +18,9 @@ export default class GameScene extends Phaser.Scene {
     this.mult   = 1.00;
     this.dead   = false;
     this.cashed = false;
-    this.speed  = 170;
+    this.baseSpeed = 170;
+    this.speed  = this.baseSpeed;
+    this.demoMode = false;
     this._obs   = [];
     this._gems  = [];
     this._bubs  = [];
@@ -140,6 +142,7 @@ export default class GameScene extends Phaser.Scene {
         if (data.type === 'round_started') {
           this.roundId = data.round_id;
           this.betDebitedByServer = true;
+          this.demoMode = !!data.demo_mode;
           if (Number.isFinite(data.balance)) state.balance = data.balance;
           if (this._startTimeout) {
             this._startTimeout.destroy();
@@ -150,7 +153,7 @@ export default class GameScene extends Phaser.Scene {
           if (data.success) {
             this._applyCashOutResult(data.payout, data.multiplier, data.balance);
           } else {
-            this._applyLossResult(data.multiplier, 'crash');
+            this._showCrashLoss(data.multiplier);
           }
         } else if (data.type === 'round_crashed') {
           this._serverCrash(data.multiplier);
@@ -222,7 +225,7 @@ export default class GameScene extends Phaser.Scene {
 
   _spawnObs() {
     if (this.dead || this.cashed) return;
-    const gapY  = Phaser.Math.Between(188, H - 188);
+    const gapY  = Phaser.Math.Between(206, H - 206);
     this._obs.push(new Obstacle(this, gapY));
   }
 
@@ -280,12 +283,57 @@ export default class GameScene extends Phaser.Scene {
 
   _serverCrash(multiplier) {
     if (this.dead || this.cashed) return;
-    if (Number.isFinite(multiplier)) this.mult = multiplier;
+    this._showCrashLoss(multiplier);
+  }
+
+  _showCrashLoss(multiplier) {
+    if (this.resultShown) return;
+    if (Number.isFinite(multiplier)) {
+      this.mult = multiplier;
+    }
     this.dead = true;
+    this.roundReady = false;
     this.sounds.playCrash();
+    this.cameras.main.flash(150, 255, 80, 110);
     this.cameras.main.shake(280, 0.012);
     this._stopTimers();
-    this._applyLossResult(this.mult, 'crash');
+    this._showCrashWave();
+    this.time.delayedCall(420, () => this._applyLossResult(this.mult, 'crash'));
+  }
+
+  _showCrashWave() {
+    const wave = this.add.graphics().setDepth(45);
+    wave.fillStyle(0xff6675, 0.26);
+    wave.fillRect(0, 0, 92, H);
+    wave.fillStyle(0x7dd3fc, 0.18);
+    wave.fillRect(92, 0, 44, H);
+    wave.lineStyle(3, 0xffdf72, 0.55);
+    wave.lineBetween(0, 0, 0, H);
+    wave.x = W + 70;
+
+    const label = this.add.text(W / 2, H / 2 - 78, 'MARE VIROU!', {
+      fontSize: '20px',
+      fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#ffdf72',
+      stroke: '#27070b',
+      strokeThickness: 5,
+    }).setOrigin(0.5).setDepth(46);
+
+    this.tweens.add({
+      targets: wave,
+      x: -160,
+      duration: 420,
+      ease: 'Cubic.easeOut',
+      onComplete: () => wave.destroy(),
+    });
+    this.tweens.add({
+      targets: label,
+      alpha: 0,
+      y: label.y - 22,
+      delay: 220,
+      duration: 280,
+      onComplete: () => label.destroy(),
+    });
   }
 
   _handleServerError(message) {
@@ -412,7 +460,7 @@ export default class GameScene extends Phaser.Scene {
     if (this.dead || this.cashed || !this.roundReady) return;
     const dt = delta / 1000;
 
-    this.speed = 170 + (this.mult - 1) * 58;
+    this.speed = this.demoMode ? this.baseSpeed : this.baseSpeed + (this.mult - 1) * 58;
 
     this._drawBg(-this.mult - 1);
 
@@ -467,8 +515,8 @@ export default class GameScene extends Phaser.Scene {
 
     this.hud.updateMult(this.mult, this.bet);
 
-    if (this.mult > 2.5 && this._tObs.delay > 1400) this._tObs.delay = 1400;
-    if (this.mult > 4.0 && this._tObs.delay > 1100) this._tObs.delay = 1100;
+    if (!this.demoMode && this.mult > 2.5 && this._tObs.delay > 1400) this._tObs.delay = 1400;
+    if (!this.demoMode && this.mult > 4.0 && this._tObs.delay > 1100) this._tObs.delay = 1100;
   }
 
   _showBonus(x, y) {

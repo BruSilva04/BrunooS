@@ -15,6 +15,11 @@ CASHOUT_UNLOCK_MULT = 2.5
 ALLOWED_BETS = {20.0, 50.0, 100.0, 200.0, 500.0}
 
 
+def is_admin_demo(user: dict) -> bool:
+    permissions = user.get("permissions") or {}
+    return user.get("role") == "admin" or bool(permissions.get("admin"))
+
+
 def wallet_reserve_error_message(exc: Exception) -> str:
     error_text = str(exc)
     if (
@@ -163,7 +168,8 @@ async def game_websocket(websocket: WebSocket):
                     "type": "round_started",
                     "round_id": round_id,
                     "server_seed_hash": seed_hash,
-                    "balance": balance
+                    "balance": balance,
+                    "demo_mode": is_admin_demo(user),
                 })
 
                 if crash_task:

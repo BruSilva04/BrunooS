@@ -5,9 +5,10 @@ export default class Obstacle {
   constructor(scene, gapY) {
     this.scene = scene;
     this.x = W + 34;
-    this.GAP = 170;
+    this.GAP = 184;
     this.WIDTH = 52;
-    this.COLLISION_HALF_WIDTH = 18;
+    this.COLLISION_HALF_WIDTH = 15;
+    this.COLLISION_VERTICAL_PADDING = 8;
     this.gapY = gapY;
     this.kind = Phaser.Utils.Array.GetRandom([
       { icon: '🦈', color: 0xff6675 },
@@ -30,13 +31,13 @@ export default class Obstacle {
     const bottomH = Math.max(0, H - 104 - botY);
 
     this.topZone.clear();
-    this.topZone.fillStyle(this.kind.color, 0.15);
+    this.topZone.fillStyle(this.kind.color, 0.24);
     this.topZone.fillRoundedRect(this.x - width / 2, 92, width, Math.max(0, topH - 92), 8);
     this.topZone.lineStyle(2, this.kind.color, 0.38);
     this.topZone.strokeRoundedRect(this.x - width / 2, 92, width, Math.max(0, topH - 92), 8);
 
     this.bottomZone.clear();
-    this.bottomZone.fillStyle(this.kind.color, 0.15);
+    this.bottomZone.fillStyle(this.kind.color, 0.24);
     this.bottomZone.fillRoundedRect(this.x - width / 2, botY, width, bottomH, 8);
     this.bottomZone.lineStyle(2, this.kind.color, 0.38);
     this.bottomZone.strokeRoundedRect(this.x - width / 2, botY, width, bottomH, 8);
@@ -57,7 +58,10 @@ export default class Obstacle {
 
     const topEdge = this.gapY - this.GAP / 2;
     const bottomEdge = this.gapY + this.GAP / 2;
-    return mermaidY - hitRadius < topEdge || mermaidY + hitRadius > bottomEdge;
+    return (
+      mermaidY - hitRadius < topEdge - this.COLLISION_VERTICAL_PADDING ||
+      mermaidY + hitRadius > bottomEdge + this.COLLISION_VERTICAL_PADDING
+    );
   }
 
   isOffScreen() {

@@ -158,7 +158,7 @@ export default class HUD {
     if (reason === 'connection') {
       return { icon: '!', title: 'CONEXAO PERDIDA', detail: 'Resultado protegido pelo servidor' };
     }
-    return { icon: '!', title: 'A MARE VIROU', detail: 'Crash da rodada' };
+    return { icon: '!', title: 'A MARE VIROU', detail: 'Crash antes do resgate' };
   }
 
   showResult(won, amount, mult, bet, reason = 'crash') {

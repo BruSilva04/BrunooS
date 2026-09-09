@@ -7,7 +7,7 @@ export default class Mermaid {
     this.trail = [];
     this.glow = scene.add.circle(75, H / 2, 30, 0x6fffe9, 0.16);
     this.sprite = scene.add.text(75, H / 2, '🧜‍♀️', { fontSize: '42px' }).setOrigin(0.5);
-    this.hitRadius = 10;
+    this.hitRadius = 8;
     this.vy = 0;
   }
 
@@ -59,7 +59,7 @@ export default class Mermaid {
   }
 
   isOutOfBounds() {
-    return this.sprite.y < 92 || this.sprite.y > H - 104;
+    return this.sprite.y < 76 || this.sprite.y > H - 82;
   }
 
   get x() {
