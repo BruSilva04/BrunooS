@@ -71,13 +71,26 @@ async def health():
 @app.get("/health/db")
 async def health_db():
     def check_supabase():
-        return (
-            get_supabase_client()
+        client = get_supabase_client()
+        users_check = (
+            client
             .table(USERS_TABLE)
-            .select("id")
+            .select("id,balance,bonus_balance,rollover_required,rollover_progress")
             .limit(1)
             .execute()
         )
+        wallet_rpc_check = client.rpc("adjust_wallet_balance", {
+            "p_user_id": "healthcheck",
+            "p_delta": 0,
+            "p_transaction_type": None,
+            "p_reference_type": None,
+            "p_reference_id": None,
+            "p_idempotency_key": None,
+            "p_metadata": {"diagnostic": "health_db"},
+            "p_rollover_required_delta": 0,
+            "p_bonus_delta": 0,
+        }).execute()
+        return users_check, wallet_rpc_check
 
     try:
         await anyio.to_thread.run_sync(check_supabase)
@@ -89,7 +102,7 @@ async def health_db():
     except Exception as exc:
         raise HTTPException(
             status_code=503,
-            detail="Supabase configurado, mas consulta falhou. Confira a chave service_role, RLS/permissoes e se backend/db/schema.sql foi aplicado.",
+            detail="Supabase configurado, mas schema de carteira falhou. Rode backend/db/schema.sql no SQL Editor e confira a chave service_role/RLS.",
         ) from exc
 
     return {"status": "ok", "database": "supabase"}

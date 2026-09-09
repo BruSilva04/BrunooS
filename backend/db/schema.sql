@@ -176,6 +176,18 @@ DROP FUNCTION IF EXISTS public.adjust_wallet_balance(
     text,
     text,
     text,
+    jsonb,
+    double precision,
+    double precision
+);
+
+DROP FUNCTION IF EXISTS public.adjust_wallet_balance(
+    text,
+    double precision,
+    text,
+    text,
+    text,
+    text,
     jsonb
 );
 
@@ -336,3 +348,5 @@ SET balance = GREATEST(0, COALESCE((
       AND wt.status = 'completed'
 ), 0))
 WHERE COALESCE(u.role, 'player') <> 'admin';
+
+NOTIFY pgrst, 'reload schema';

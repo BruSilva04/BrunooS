@@ -15,6 +15,20 @@ CASHOUT_UNLOCK_MULT = 2.5
 ALLOWED_BETS = {20.0, 50.0, 100.0, 200.0, 500.0}
 
 
+def wallet_reserve_error_message(exc: Exception) -> str:
+    error_text = str(exc)
+    if (
+        "PGRST202" in error_text
+        or "schema cache" in error_text
+        or "adjust_wallet_balance" in error_text
+        or "bonus_balance" in error_text
+        or "rollover_required" in error_text
+        or "rollover_progress" in error_text
+    ):
+        return "Supabase desatualizado. Rode backend/db/schema.sql no SQL Editor e aguarde o Render redeployar."
+    return "Falha ao reservar saldo da rodada"
+
+
 def current_multiplier(round_state: dict) -> float:
     elapsed = max(0.0, time.monotonic() - round_state["started_at"])
     return round(1.0 + elapsed * MULTIPLIER_PER_SECOND, 3)
@@ -128,12 +142,12 @@ async def game_websocket(websocket: WebSocket):
                         reference_id=round_id,
                         idempotency_key=f"bet:{round_id}",
                     )
-                except Exception:
+                except Exception as exc:
                     await update_round(round_id, payout=0, status="canceled")
                     active_round = None
                     await websocket.send_json({
                         "type": "error",
-                        "message": "Falha ao reservar saldo da rodada"
+                        "message": wallet_reserve_error_message(exc)
                     })
                     continue
                 if not charged:
