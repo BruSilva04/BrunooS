@@ -56,6 +56,11 @@ export default class AuthScene extends Phaser.Scene {
           pointer-events: none;
           overflow-y: auto;
           -webkit-overflow-scrolling: touch;
+          scroll-padding: 18px 0;
+        }
+        .sereia-auth-root.keyboard-open {
+          place-items: start center;
+          padding-top: max(8px, env(safe-area-inset-top));
         }
         .sereia-auth-card {
           width: min(366px, calc(100vw - 22px));
@@ -70,6 +75,9 @@ export default class AuthScene extends Phaser.Scene {
           padding: ${isLogin ? '20px' : '16px'};
           pointer-events: auto;
           scrollbar-width: none;
+        }
+        .sereia-auth-root.keyboard-open .sereia-auth-card {
+          max-height: calc(var(--app-height, 100dvh) - 16px);
         }
         .sereia-auth-card::-webkit-scrollbar { display: none; }
         .sereia-brand { text-align: center; margin-bottom: ${isLogin ? '16px' : '10px'}; }
@@ -206,7 +214,27 @@ export default class AuthScene extends Phaser.Scene {
       });
     });
 
+    this.root.querySelectorAll('input').forEach((input) => {
+      input.addEventListener('focus', () => this._handleInputFocus(input));
+      input.addEventListener('blur', () => this._handleInputBlur());
+    });
+
     this.root.querySelector('form').addEventListener('submit', (event) => this._submit(event));
+  }
+
+  _handleInputFocus(input) {
+    this.root.classList.add('keyboard-open');
+    window.setTimeout(() => {
+      input.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'smooth' });
+    }, 90);
+  }
+
+  _handleInputBlur() {
+    window.setTimeout(() => {
+      if (!this.root?.contains(document.activeElement)) {
+        this.root?.classList.remove('keyboard-open');
+      }
+    }, 140);
   }
 
   async _submit(event) {

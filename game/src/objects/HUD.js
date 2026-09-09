@@ -206,11 +206,14 @@ export default class HUD {
       fontFamily: '"Arial Black", Arial, sans-serif',
       color: won ? '#8fffe7' : '#ffc0c7'
     }).setOrigin(0.5);
-    this.scene.add.text(W / 2, py + 216, 'TOQUE PARA JOGAR', {
+    const continueText = this.scene.add.text(W / 2, py + 216, 'AGUARDE...', {
       fontSize: '12px',
       fontFamily: '"Arial Black", Arial, sans-serif',
       color: '#8eb8c7'
     }).setOrigin(0.5);
+    this.scene.time.delayedCall(1800, () => {
+      continueText.setText('TOQUE PARA VOLTAR');
+    });
 
     this.scene.tweens.add({
       targets: [overlay, panel],

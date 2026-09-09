@@ -33,6 +33,7 @@ export default class LobbyScene extends Phaser.Scene {
     this.snapshot = null;
     this.currentTab = data.tab || 'lobby';
     this.modal = null;
+    this.notice = data.notice || '';
     this.walletMessage = '';
     this.walletBusy = false;
     this.currentDeposit = null;
@@ -137,6 +138,8 @@ export default class LobbyScene extends Phaser.Scene {
       </section>
 
       ${this._rolloverHtml()}
+
+      ${this.notice ? `<section class="lobby-notice">${this._escape(this.notice)}</section>` : ''}
 
       <button class="promo-strip" type="button" data-tab="promo">
         <span>EXCLUSIVO</span>
@@ -812,6 +815,16 @@ export default class LobbyScene extends Phaser.Scene {
           padding: 12px;
           display: grid;
           gap: 9px;
+        }
+        .lobby-notice {
+          padding: 12px;
+          border-radius: 10px;
+          color: #fff7dc;
+          background: rgba(159, 20, 38, 0.84);
+          border: 1px solid rgba(255, 157, 165, 0.45);
+          font-size: 13px;
+          font-weight: 900;
+          line-height: 1.25;
         }
         .rollover-card.complete {
           display: flex;

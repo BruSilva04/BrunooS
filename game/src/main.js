@@ -41,11 +41,11 @@ window.addEventListener('orientationchange', () => {
 }, { passive: true });
 if (window.visualViewport) {
   window.visualViewport.addEventListener('resize', refreshScale, { passive: true });
-  window.visualViewport.addEventListener('scroll', refreshScale, { passive: true });
 }
 
-function forceLoginWhenSessionExpires() {
+function forceLoginWhenSessionExpires({ allowDuringGame = false } = {}) {
   if (game.scene.isActive('Auth')) return;
+  if (game.scene.isActive('Game') && !allowDuringGame) return;
   if (hasValidSession()) return;
 
   clearSession();
@@ -60,8 +60,8 @@ function forceLoginWhenSessionExpires() {
 });
 
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) forceLoginWhenSessionExpires();
+  if (!document.hidden) forceLoginWhenSessionExpires({ allowDuringGame: true });
 });
-window.addEventListener('focus', forceLoginWhenSessionExpires);
-window.addEventListener('pageshow', forceLoginWhenSessionExpires);
+window.addEventListener('focus', () => forceLoginWhenSessionExpires({ allowDuringGame: true }));
+window.addEventListener('pageshow', () => forceLoginWhenSessionExpires({ allowDuringGame: true }));
 window.setInterval(forceLoginWhenSessionExpires, 60 * 1000);

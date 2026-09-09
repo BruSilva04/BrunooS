@@ -211,7 +211,10 @@ export default class GameScene extends Phaser.Scene {
         clearSession();
         this.scene.start('Auth');
       } else {
-        this.scene.start('Lobby', { balance: state.balance });
+        this.scene.start('Lobby', {
+          balance: state.balance,
+          notice: message || 'Nao foi possivel iniciar a rodada. Tente novamente.',
+        });
       }
       return;
     }
@@ -255,7 +258,7 @@ export default class GameScene extends Phaser.Scene {
     if (this.resultShown) return;
     this.resultShown = true;
     this.hud.showResult(won, amount, this.mult, this.bet, reason);
-    this.time.delayedCall(500, () => {
+    this.time.delayedCall(1800, () => {
       this.input.once('pointerdown', () => this.scene.start('Lobby', { balance: state.balance }));
     });
   }
