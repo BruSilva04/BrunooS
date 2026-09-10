@@ -1,4 +1,5 @@
 import time
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -10,6 +11,7 @@ from db.database import (
     get_user_by_email,
     get_user_by_id,
     get_user_by_username,
+    resolve_acquisition_attribution,
     rollover_status,
 )
 from services.auth import create_session_token, hash_password, verify_password, verify_session_token
@@ -26,6 +28,9 @@ class RegisterRequest(BaseModel):
     document: str = Field(min_length=11, max_length=18)
     document_type: str = Field(default="cpf", pattern=r"^(cpf|cnpj)$")
     password: str = Field(min_length=6, max_length=128)
+    acquisition_click_id: str | None = Field(default=None, max_length=80)
+    acquisition_tracking_token: str | None = Field(default=None, max_length=2048)
+    referral_code: str | None = Field(default=None, max_length=64)
 
 
 class LoginRequest(BaseModel):
@@ -84,6 +89,8 @@ def public_user(user: dict) -> dict:
         "has_kyc": bool(user.get("legal_name") and user.get("document")),
         "role": user.get("role", "player"),
         "permissions": user.get("permissions", {}),
+        "referral_code": user.get("referral_code") or "",
+        "acquisition_campaign_id": user.get("acquisition_campaign_id"),
         "balance": float(user.get("balance", 0) or 0),
         "bonus_balance": float(user.get("bonus_balance", 0) or 0),
         "rollover": rollover_status(user),
@@ -103,8 +110,14 @@ def db_unavailable(exc: Exception) -> HTTPException:
         or "rollover_required" in error_text
         or "rollover_progress" in error_text
         or "adjust_wallet_balance" in error_text
+        or "acquisition_campaign_id" in error_text
+        or "acquisition_click_id" in error_text
+        or "campaign_id" in error_text
+        or "affiliates" in error_text
+        or "campaigns" in error_text
+        or "acquisition_clicks" in error_text
     ):
-        detail = "Schema de usuarios desatualizado. Rode novamente backend/db/schema.sql no SQL Editor do Supabase."
+        detail = "Schema do Supabase desatualizado. Rode novamente backend/db/schema.sql no SQL Editor do Supabase."
     else:
         detail = "Banco Supabase indisponivel. Verifique SUPABASE_URL, SUPABASE_SECRET_KEY e permissoes do projeto."
 
@@ -137,6 +150,21 @@ async def register(payload: RegisterRequest, request: Request):
         if await get_user_by_document(document):
             raise HTTPException(status_code=409, detail="Documento ja cadastrado")
 
+        attribution = await resolve_acquisition_attribution(
+            payload.acquisition_click_id,
+            payload.acquisition_tracking_token,
+            payload.referral_code,
+        )
+
+        acquisition_fields = {}
+        if attribution:
+            acquisition_fields = {
+                "acquisition_campaign_id": attribution["campaign_id"],
+                "acquisition_click_id": attribution["click_id"],
+                "referral_code": attribution["referral_code"],
+                "attributed_at": datetime.now(timezone.utc).isoformat(),
+            }
+
         user = await create_user({
             "phone": payload.phone.strip(),
             "email": email,
@@ -148,6 +176,7 @@ async def register(payload: RegisterRequest, request: Request):
             "role": "player",
             "permissions": {"play": True, "admin": False},
             "balance": 0.0,
+            **acquisition_fields,
         })
     except HTTPException:
         raise

@@ -138,6 +138,7 @@ export default class LobbyScene extends Phaser.Scene {
       </section>
 
       ${this._rolloverHtml()}
+      ${this._adminEntryHtml()}
 
       ${this.notice ? `<section class="lobby-notice">${this._escape(this.notice)}</section>` : ''}
 
@@ -235,6 +236,7 @@ export default class LobbyScene extends Phaser.Scene {
         ${this._profileRowHtml('Telefone', user.phone || '-')}
         ${this._profileRowHtml('Nome', user.legal_name || '-')}
         ${this._profileRowHtml('CPF/CNPJ', user.document_masked || '-')}
+        ${this._profileRowHtml('Origem', user.referral_code || '-')}
         ${this._profileRowHtml('Saldo', this._money(state.balance))}
         ${this._profileRowHtml('Bonus', this._money(this.snapshot?.bonus_balance || 0))}
         ${this._profileRowHtml('Falta rollover', this._money(rollover.remaining || 0))}
@@ -247,9 +249,27 @@ export default class LobbyScene extends Phaser.Scene {
       </section>
 
       <section class="profile-actions">
+        ${this._isAdmin() ? '<button class="gold-btn" type="button" data-action="admin">Painel Admin</button>' : ''}
         <button class="gold-btn" type="button" data-action="refresh">Atualizar</button>
         <button class="dark-btn" type="button" data-action="logout">Sair</button>
       </section>
+    `;
+  }
+
+  _isAdmin() {
+    const user = this.snapshot?.user || this.user || {};
+    const permissions = user.permissions || {};
+    return user.role === 'admin' || !!permissions.admin;
+  }
+
+  _adminEntryHtml() {
+    if (!this._isAdmin()) return '';
+    return `
+      <button class="admin-entry" type="button" data-action="admin">
+        <span>OPERACAO</span>
+        <strong>Painel Admin</strong>
+        <em>Aquisicao, influenciadores e campanhas</em>
+      </button>
     `;
   }
 
@@ -482,6 +502,8 @@ export default class LobbyScene extends Phaser.Scene {
         } else if (action === 'logout') {
           clearSession();
           this.scene.start('Auth');
+        } else if (action === 'admin') {
+          this.scene.start('AdminDashboard');
         } else if (action === 'play') {
           this.scene.start('Menu', { balance: state.balance });
         }
@@ -762,6 +784,7 @@ export default class LobbyScene extends Phaser.Scene {
         }
         .wallet-card,
         .rollover-card,
+        .admin-entry,
         .game-card,
         .history-panel,
         .promo-ledger,
@@ -883,6 +906,32 @@ export default class LobbyScene extends Phaser.Scene {
         .rollover-lines strong {
           color: #ffdf72;
           font-size: 12px;
+        }
+        .admin-entry {
+          width: 100%;
+          min-height: 76px;
+          display: grid;
+          gap: 5px;
+          text-align: left;
+          padding: 13px 14px;
+          color: #fff7dc;
+          background:
+            linear-gradient(135deg, rgba(23, 35, 58, 0.96), rgba(59, 16, 28, 0.96)),
+            radial-gradient(circle at top right, rgba(244, 200, 74, 0.18), transparent 40%);
+        }
+        .admin-entry span {
+          color: #80ffd7;
+          font: 900 11px/1 "Arial Black", Arial, sans-serif;
+        }
+        .admin-entry strong {
+          color: #ffdf72;
+          font: 900 18px/1 "Arial Black", Arial, sans-serif;
+        }
+        .admin-entry em {
+          color: #ffd0be;
+          font-size: 12px;
+          font-style: normal;
+          font-weight: 800;
         }
         .wallet-actions,
         .profile-actions {

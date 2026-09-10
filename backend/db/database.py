@@ -1,19 +1,34 @@
 import asyncio
 import os
 import uuid
+from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qsl, urlencode
 
 import anyio
 from dotenv import load_dotenv
 from supabase import Client, create_client
 from services.auth import hash_password
+from services.tracking import (
+    date_in_range,
+    normalize_referral_code,
+    parse_datetime_bound,
+    parse_row_datetime,
+    require_referral_code,
+    safe_div,
+    safe_percent,
+    verify_tracking_token,
+)
 
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 ROUNDS_TABLE = "rounds"
 USERS_TABLE = "users"
+AFFILIATES_TABLE = "affiliates"
+CAMPAIGNS_TABLE = "campaigns"
+ACQUISITION_CLICKS_TABLE = "acquisition_clicks"
 WALLET_TRANSACTIONS_TABLE = "wallet_transactions"
 PAYMENT_INTENTS_TABLE = "payment_intents"
 WITHDRAWAL_REQUESTS_TABLE = "withdrawal_requests"
@@ -44,6 +59,10 @@ USER_COLUMNS = {
     "bonus_balance",
     "rollover_required",
     "rollover_progress",
+    "acquisition_campaign_id",
+    "acquisition_click_id",
+    "referral_code",
+    "attributed_at",
 }
 
 BONUS_MIN_DEPOSIT = 100.0
@@ -164,6 +183,10 @@ def _user_payload(user_data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
 async def create_user(user_data: dict[str, Any]) -> dict[str, Any]:
     payload = _user_payload(user_data)
 
@@ -232,6 +255,291 @@ async def get_user_by_id(user_id: str) -> dict[str, Any] | None:
 
     response = await anyio.to_thread.run_sync(fetch_user)
     return response.data[0] if response.data else None
+
+
+def _clean_text(value: str | None, max_length: int = 500) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    return text[:max_length]
+
+
+def _clean_tracking_path(value: str | None) -> str | None:
+    text = _clean_text(value, 512)
+    if not text:
+        return None
+    path, _, query = text.partition("?")
+    safe_params = []
+    for key, item in parse_qsl(query, keep_blank_values=False):
+        if key in {"ref", "utm_source", "utm_medium", "utm_campaign", "utm_content"}:
+            safe_params.append((key, item[:160]))
+    safe_query = urlencode(safe_params)
+    return f"{path[:320]}?{safe_query}" if safe_query else path[:320]
+
+
+def _clean_referrer_url(value: str | None) -> str | None:
+    text = _clean_text(value, 1024)
+    if not text:
+        return None
+    return text.split("#", 1)[0].split("?", 1)[0][:512]
+
+
+async def list_affiliates() -> list[dict[str, Any]]:
+    def fetch_affiliates():
+        return (
+            get_supabase_client()
+            .table(AFFILIATES_TABLE)
+            .select("*")
+            .order("created_at", desc=True)
+            .limit(500)
+            .execute()
+        )
+
+    response = await anyio.to_thread.run_sync(fetch_affiliates)
+    return response.data or []
+
+
+async def get_affiliate(affiliate_id: str) -> dict[str, Any] | None:
+    def fetch_affiliate():
+        return (
+            get_supabase_client()
+            .table(AFFILIATES_TABLE)
+            .select("*")
+            .eq("id", affiliate_id)
+            .limit(1)
+            .execute()
+        )
+
+    response = await anyio.to_thread.run_sync(fetch_affiliate)
+    return response.data[0] if response.data else None
+
+
+async def create_affiliate(data: dict[str, Any]) -> dict[str, Any]:
+    payload = {
+        "name": _clean_text(data.get("name"), 120),
+        "handle": _clean_text(data.get("handle"), 80),
+        "contact": _clean_text(data.get("contact"), 180),
+        "status": _clean_text(data.get("status"), 32) or "active",
+        "notes": _clean_text(data.get("notes"), 1000),
+    }
+    payload = {key: value for key, value in payload.items() if value is not None}
+
+    def insert_affiliate():
+        return get_supabase_client().table(AFFILIATES_TABLE).insert(payload).execute()
+
+    response = await anyio.to_thread.run_sync(insert_affiliate)
+    return response.data[0]
+
+
+async def update_affiliate(affiliate_id: str, data: dict[str, Any]) -> dict[str, Any] | None:
+    allowed = {"name", "handle", "contact", "status", "notes"}
+    updates = {
+        key: _clean_text(value, 1000 if key == "notes" else 180)
+        for key, value in data.items()
+        if key in allowed and value is not None
+    }
+    if not updates:
+        return await get_affiliate(affiliate_id)
+    updates["updated_at"] = utc_now_iso()
+
+    def patch_affiliate():
+        return (
+            get_supabase_client()
+            .table(AFFILIATES_TABLE)
+            .update(updates)
+            .eq("id", affiliate_id)
+            .execute()
+        )
+
+    response = await anyio.to_thread.run_sync(patch_affiliate)
+    return response.data[0] if response.data else None
+
+
+def campaign_is_active(campaign: dict[str, Any]) -> bool:
+    if not campaign or campaign.get("status") != "active":
+        return False
+    now = datetime.now(timezone.utc)
+    starts_at = parse_datetime_bound(campaign.get("starts_at"))
+    ends_at = parse_datetime_bound(campaign.get("ends_at"), end_of_day=True)
+    if starts_at and starts_at > now:
+        return False
+    if ends_at and ends_at < now:
+        return False
+    return True
+
+
+async def list_campaigns(
+    affiliate_id: str | None = None,
+    campaign_id: str | None = None,
+) -> list[dict[str, Any]]:
+    def fetch_campaigns():
+        query = (
+            get_supabase_client()
+            .table(CAMPAIGNS_TABLE)
+            .select("*")
+            .order("created_at", desc=True)
+            .limit(1000)
+        )
+        if affiliate_id:
+            query = query.eq("affiliate_id", affiliate_id)
+        if campaign_id:
+            query = query.eq("id", campaign_id)
+        return query.execute()
+
+    response = await anyio.to_thread.run_sync(fetch_campaigns)
+    return response.data or []
+
+
+async def get_campaign(campaign_id: str) -> dict[str, Any] | None:
+    campaigns = await list_campaigns(campaign_id=campaign_id)
+    return campaigns[0] if campaigns else None
+
+
+async def get_campaign_by_referral_code(referral_code: str) -> dict[str, Any] | None:
+    code = normalize_referral_code(referral_code)
+    if not code:
+        return None
+
+    def fetch_campaign():
+        return (
+            get_supabase_client()
+            .table(CAMPAIGNS_TABLE)
+            .select("*")
+            .eq("referral_code", code)
+            .limit(1)
+            .execute()
+        )
+
+    response = await anyio.to_thread.run_sync(fetch_campaign)
+    return response.data[0] if response.data else None
+
+
+async def get_active_campaign_by_referral_code(referral_code: str) -> dict[str, Any] | None:
+    campaign = await get_campaign_by_referral_code(referral_code)
+    return campaign if campaign_is_active(campaign or {}) else None
+
+
+async def create_campaign(data: dict[str, Any]) -> dict[str, Any]:
+    code = require_referral_code(data.get("referral_code"))
+    payload = {
+        "affiliate_id": data.get("affiliate_id"),
+        "name": _clean_text(data.get("name"), 160),
+        "referral_code": code,
+        "status": _clean_text(data.get("status"), 32) or "active",
+        "media_cost": round(float(data.get("media_cost", 0) or 0), 2),
+        "starts_at": data.get("starts_at"),
+        "ends_at": data.get("ends_at"),
+        "metadata": data.get("metadata") or {},
+    }
+    payload = {key: value for key, value in payload.items() if value is not None}
+
+    def insert_campaign():
+        return get_supabase_client().table(CAMPAIGNS_TABLE).insert(payload).execute()
+
+    response = await anyio.to_thread.run_sync(insert_campaign)
+    return response.data[0]
+
+
+async def update_campaign(campaign_id: str, data: dict[str, Any]) -> dict[str, Any] | None:
+    allowed = {"affiliate_id", "name", "referral_code", "status", "media_cost", "starts_at", "ends_at", "metadata"}
+    updates: dict[str, Any] = {}
+    for key, value in data.items():
+        if key not in allowed or value is None:
+            continue
+        if key == "referral_code":
+            updates[key] = require_referral_code(value)
+        elif key == "media_cost":
+            updates[key] = round(float(value or 0), 2)
+        elif key in {"name", "status"}:
+            updates[key] = _clean_text(value, 160)
+        else:
+            updates[key] = value
+
+    if not updates:
+        return await get_campaign(campaign_id)
+    updates["updated_at"] = utc_now_iso()
+
+    def patch_campaign():
+        return (
+            get_supabase_client()
+            .table(CAMPAIGNS_TABLE)
+            .update(updates)
+            .eq("id", campaign_id)
+            .execute()
+        )
+
+    response = await anyio.to_thread.run_sync(patch_campaign)
+    return response.data[0] if response.data else None
+
+
+async def create_acquisition_click(data: dict[str, Any]) -> dict[str, Any]:
+    payload = {
+        "campaign_id": data["campaign_id"],
+        "visitor_id": _clean_text(data.get("visitor_id"), 80),
+        "landing_path": _clean_tracking_path(data.get("landing_path")),
+        "referrer_url": _clean_referrer_url(data.get("referrer_url")),
+        "utm_source": _clean_text(data.get("utm_source"), 160),
+        "utm_medium": _clean_text(data.get("utm_medium"), 160),
+        "utm_campaign": _clean_text(data.get("utm_campaign"), 160),
+        "utm_content": _clean_text(data.get("utm_content"), 160),
+    }
+    payload = {key: value for key, value in payload.items() if value is not None}
+
+    def insert_click():
+        return get_supabase_client().table(ACQUISITION_CLICKS_TABLE).insert(payload).execute()
+
+    response = await anyio.to_thread.run_sync(insert_click)
+    return response.data[0]
+
+
+async def get_acquisition_click(click_id: str) -> dict[str, Any] | None:
+    def fetch_click():
+        return (
+            get_supabase_client()
+            .table(ACQUISITION_CLICKS_TABLE)
+            .select("*")
+            .eq("id", click_id)
+            .limit(1)
+            .execute()
+        )
+
+    response = await anyio.to_thread.run_sync(fetch_click)
+    return response.data[0] if response.data else None
+
+
+async def resolve_acquisition_attribution(
+    click_id: str | None,
+    tracking_token: str | None,
+    referral_code: str | None = None,
+) -> dict[str, Any] | None:
+    token_payload = verify_tracking_token(tracking_token)
+    if not token_payload:
+        return None
+
+    if click_id and token_payload.get("click_id") != click_id:
+        return None
+
+    code = normalize_referral_code(referral_code or token_payload.get("referral_code"))
+    if not code or token_payload.get("referral_code") != code:
+        return None
+
+    click = await get_acquisition_click(token_payload["click_id"])
+    if not click:
+        return None
+    if str(click.get("campaign_id")) != str(token_payload.get("campaign_id")):
+        return None
+
+    campaign = await get_campaign(str(click["campaign_id"]))
+    if not campaign or normalize_referral_code(campaign.get("referral_code")) != code:
+        return None
+
+    return {
+        "campaign_id": campaign["id"],
+        "click_id": click["id"],
+        "referral_code": code,
+    }
 
 
 async def update_user_profile(user_id: str, **kwargs: Any) -> dict[str, Any] | None:
@@ -462,7 +770,12 @@ async def adjust_user_balance(
     return True, new_balance
 
 
-async def create_payment_intent(user_id: str, amount: float, provider: str = "sandbox") -> dict[str, Any]:
+async def create_payment_intent(
+    user_id: str,
+    amount: float,
+    provider: str = "sandbox",
+    campaign_id: str | None = None,
+) -> dict[str, Any]:
     intent_id = str(uuid.uuid4())
     amount = round(float(amount), 2)
     is_sandbox = provider == "sandbox"
@@ -475,6 +788,7 @@ async def create_payment_intent(user_id: str, amount: float, provider: str = "sa
         "status": "pending",
         "pix_qr_code": f"SEREIA-SANDBOX-PIX:{intent_id}:{amount:.2f}" if is_sandbox else None,
         "pix_copy_paste": f"SEREIA-SANDBOX-PIX:{intent_id}:{amount:.2f}" if is_sandbox else None,
+        "campaign_id": campaign_id,
         "metadata": {"mode": provider},
     }
     payload = {key: value for key, value in payload.items() if value is not None}
@@ -493,11 +807,13 @@ async def update_payment_intent(intent_id: str, **kwargs: Any) -> dict[str, Any]
         "pix_qr_code",
         "pix_copy_paste",
         "expires_at",
+        "campaign_id",
         "metadata",
     }
     updates = {key: value for key, value in kwargs.items() if key in allowed and value is not None}
     if not updates:
         return await get_payment_intent(intent_id)
+    updates["updated_at"] = utc_now_iso()
 
     def update_intent():
         return (
@@ -551,6 +867,7 @@ async def confirm_payment_intent(intent_id: str, admin_user_id: str | None = Non
             .table(PAYMENT_INTENTS_TABLE)
             .update({
                 "status": "paid",
+                "updated_at": utc_now_iso(),
                 "metadata": {
                     **(intent.get("metadata") or {}),
                     "balance_after": balance,
@@ -875,6 +1192,212 @@ async def get_operator_settlement_by_provider_transfer_id(provider_transfer_id: 
     return response.data[0] if response.data else None
 
 
+def _blank_acquisition_metrics(campaign: dict[str, Any] | None = None, affiliate: dict[str, Any] | None = None) -> dict[str, Any]:
+    media_cost = round(float((campaign or {}).get("media_cost", 0) or 0), 2)
+    return {
+        "affiliate": affiliate,
+        "campaign": campaign,
+        "clicks_total": 0,
+        "unique_clicks": 0,
+        "signups": 0,
+        "depositors": 0,
+        "ftd": 0,
+        "total_deposited": 0.0,
+        "deposit_count": 0,
+        "total_bets": 0.0,
+        "total_payouts": 0.0,
+        "ggr": 0.0,
+        "media_cost": media_cost,
+        "cac": 0.0,
+        "conversion_signup": 0.0,
+        "conversion_depositor": 0.0,
+        "conversion_click_to_depositor": 0.0,
+        "media_gross_result": round(-media_cost, 2),
+    }
+
+
+def _finalize_acquisition_metrics(metrics: dict[str, Any], visitors: set[str], depositors: set[str]) -> dict[str, Any]:
+    metrics["unique_clicks"] = len(visitors)
+    metrics["depositors"] = len(depositors)
+    metrics["total_deposited"] = round(float(metrics["total_deposited"] or 0), 2)
+    metrics["total_bets"] = round(float(metrics["total_bets"] or 0), 2)
+    metrics["total_payouts"] = round(float(metrics["total_payouts"] or 0), 2)
+    metrics["ggr"] = round(metrics["total_bets"] - metrics["total_payouts"], 2)
+    metrics["cac"] = safe_div(metrics["media_cost"], metrics["depositors"])
+    metrics["conversion_signup"] = safe_percent(metrics["signups"], metrics["unique_clicks"])
+    metrics["conversion_depositor"] = safe_percent(metrics["depositors"], metrics["signups"])
+    metrics["conversion_click_to_depositor"] = safe_percent(metrics["depositors"], metrics["unique_clicks"])
+    metrics["media_gross_result"] = round(metrics["ggr"] - metrics["media_cost"], 2)
+    return metrics
+
+
+def _sum_acquisition_rows(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    overview = _blank_acquisition_metrics()
+    for row in rows:
+        overview["clicks_total"] += int(row.get("clicks_total", 0) or 0)
+        overview["unique_clicks"] += int(row.get("unique_clicks", 0) or 0)
+        overview["signups"] += int(row.get("signups", 0) or 0)
+        overview["depositors"] += int(row.get("depositors", 0) or 0)
+        overview["ftd"] += int(row.get("ftd", 0) or 0)
+        overview["total_deposited"] += float(row.get("total_deposited", 0) or 0)
+        overview["deposit_count"] += int(row.get("deposit_count", 0) or 0)
+        overview["total_bets"] += float(row.get("total_bets", 0) or 0)
+        overview["total_payouts"] += float(row.get("total_payouts", 0) or 0)
+        overview["media_cost"] += float(row.get("media_cost", 0) or 0)
+
+    overview["total_deposited"] = round(overview["total_deposited"], 2)
+    overview["total_bets"] = round(overview["total_bets"], 2)
+    overview["total_payouts"] = round(overview["total_payouts"], 2)
+    overview["media_cost"] = round(overview["media_cost"], 2)
+    overview["ggr"] = round(overview["total_bets"] - overview["total_payouts"], 2)
+    overview["cac"] = safe_div(overview["media_cost"], overview["depositors"])
+    overview["conversion_signup"] = safe_percent(overview["signups"], overview["unique_clicks"])
+    overview["conversion_depositor"] = safe_percent(overview["depositors"], overview["signups"])
+    overview["conversion_click_to_depositor"] = safe_percent(overview["depositors"], overview["unique_clicks"])
+    overview["media_gross_result"] = round(overview["ggr"] - overview["media_cost"], 2)
+    return overview
+
+
+async def get_acquisition_report(
+    from_date: str | None = None,
+    to_date: str | None = None,
+    affiliate_id: str | None = None,
+    campaign_id: str | None = None,
+) -> dict[str, Any]:
+    start = parse_datetime_bound(from_date)
+    end = parse_datetime_bound(to_date, end_of_day=True)
+    campaigns = await list_campaigns(affiliate_id=affiliate_id, campaign_id=campaign_id)
+    affiliates = await list_affiliates()
+    affiliate_by_id = {str(item["id"]): item for item in affiliates}
+    campaign_ids = [str(item["id"]) for item in campaigns]
+    if not campaign_ids:
+        return {"overview": _blank_acquisition_metrics(), "rows": []}
+
+    def fetch_clicks():
+        return (
+            get_supabase_client()
+            .table(ACQUISITION_CLICKS_TABLE)
+            .select("id,campaign_id,visitor_id,created_at")
+            .in_("campaign_id", campaign_ids)
+            .order("created_at", desc=True)
+            .limit(10000)
+            .execute()
+        )
+
+    def fetch_users():
+        return (
+            get_supabase_client()
+            .table(USERS_TABLE)
+            .select("id,acquisition_campaign_id,acquisition_click_id,referral_code,attributed_at,created_at")
+            .in_("acquisition_campaign_id", campaign_ids)
+            .limit(10000)
+            .execute()
+        )
+
+    def fetch_paid_deposits():
+        return (
+            get_supabase_client()
+            .table(PAYMENT_INTENTS_TABLE)
+            .select("id,user_id,campaign_id,amount,status,created_at,updated_at")
+            .eq("status", "paid")
+            .limit(10000)
+            .execute()
+        )
+
+    def fetch_rounds():
+        return (
+            get_supabase_client()
+            .table(ROUNDS_TABLE)
+            .select("round_id,user_id,bet,payout,status,created_at")
+            .in_("status", ["won", "lost"])
+            .limit(10000)
+            .execute()
+        )
+
+    clicks_response, users_response, deposits_response, rounds_response = await asyncio.gather(
+        anyio.to_thread.run_sync(fetch_clicks),
+        anyio.to_thread.run_sync(fetch_users),
+        anyio.to_thread.run_sync(fetch_paid_deposits),
+        anyio.to_thread.run_sync(fetch_rounds),
+    )
+
+    users = users_response.data or []
+    user_campaign = {
+        str(user["id"]): str(user["acquisition_campaign_id"])
+        for user in users
+        if user.get("acquisition_campaign_id")
+    }
+    metrics_by_campaign: dict[str, dict[str, Any]] = {}
+    visitors_by_campaign: dict[str, set[str]] = {}
+    depositors_by_campaign: dict[str, set[str]] = {}
+
+    for campaign in campaigns:
+        cid = str(campaign["id"])
+        affiliate = affiliate_by_id.get(str(campaign.get("affiliate_id")))
+        metrics_by_campaign[cid] = _blank_acquisition_metrics(campaign, affiliate)
+        visitors_by_campaign[cid] = set()
+        depositors_by_campaign[cid] = set()
+
+    for click in clicks_response.data or []:
+        cid = str(click.get("campaign_id") or "")
+        if cid not in metrics_by_campaign or not date_in_range(click.get("created_at"), start, end):
+            continue
+        metrics_by_campaign[cid]["clicks_total"] += 1
+        visitor_id = str(click.get("visitor_id") or click.get("id") or "")
+        if visitor_id:
+            visitors_by_campaign[cid].add(visitor_id)
+
+    for user in users:
+        cid = str(user.get("acquisition_campaign_id") or "")
+        attributed_at = user.get("attributed_at") or user.get("created_at")
+        if cid not in metrics_by_campaign or not date_in_range(attributed_at, start, end):
+            continue
+        metrics_by_campaign[cid]["signups"] += 1
+
+    all_paid_deposits = deposits_response.data or []
+    first_deposit_by_user: dict[str, dict[str, Any]] = {}
+    for deposit in all_paid_deposits:
+        user_id = str(deposit.get("user_id") or "")
+        if not user_id:
+            continue
+        seen = first_deposit_by_user.get(user_id)
+        deposit_dt = parse_row_datetime(deposit.get("updated_at") or deposit.get("created_at"))
+        seen_dt = parse_row_datetime((seen or {}).get("updated_at") or (seen or {}).get("created_at"))
+        if not seen or (deposit_dt and seen_dt and deposit_dt < seen_dt):
+            first_deposit_by_user[user_id] = deposit
+
+    for deposit in all_paid_deposits:
+        user_id = str(deposit.get("user_id") or "")
+        cid = str(deposit.get("campaign_id") or user_campaign.get(user_id) or "")
+        event_at = deposit.get("updated_at") or deposit.get("created_at")
+        if cid not in metrics_by_campaign or not date_in_range(event_at, start, end):
+            continue
+        amount = round(float(deposit.get("amount", 0) or 0), 2)
+        metrics_by_campaign[cid]["deposit_count"] += 1
+        metrics_by_campaign[cid]["total_deposited"] += amount
+        if user_id:
+            depositors_by_campaign[cid].add(user_id)
+            first_deposit = first_deposit_by_user.get(user_id)
+            first_campaign_id = str((first_deposit or {}).get("campaign_id") or user_campaign.get(user_id) or "")
+            if first_deposit and str(first_deposit.get("id")) == str(deposit.get("id")) and first_campaign_id == cid:
+                metrics_by_campaign[cid]["ftd"] += 1
+
+    for round_data in rounds_response.data or []:
+        cid = user_campaign.get(str(round_data.get("user_id") or ""))
+        if cid not in metrics_by_campaign or not date_in_range(round_data.get("created_at"), start, end):
+            continue
+        metrics_by_campaign[cid]["total_bets"] += float(round_data.get("bet", 0) or 0)
+        metrics_by_campaign[cid]["total_payouts"] += float(round_data.get("payout", 0) or 0)
+
+    rows = [
+        _finalize_acquisition_metrics(metrics_by_campaign[cid], visitors_by_campaign[cid], depositors_by_campaign[cid])
+        for cid in campaign_ids
+        if cid in metrics_by_campaign
+    ]
+    rows.sort(key=lambda row: (row.get("media_gross_result", 0), row.get("total_deposited", 0)), reverse=True)
+    return {"overview": _sum_acquisition_rows(rows), "rows": rows}
+
+
 async def list_wallet_snapshot(user_id: str) -> dict[str, Any] | None:
     user = await get_user_by_id(user_id)
     if not user:
@@ -982,6 +1505,8 @@ async def get_lobby_snapshot(user_id: str) -> dict[str, Any] | None:
             "has_kyc": bool(user.get("legal_name") and user.get("document")),
             "role": user.get("role", "player"),
             "permissions": user.get("permissions", {}),
+            "referral_code": user.get("referral_code") or "",
+            "acquisition_campaign_id": user.get("acquisition_campaign_id"),
         },
         "balance": float(user.get("balance", 0) or 0),
         "bonus_balance": float(user.get("bonus_balance", 0) or 0),

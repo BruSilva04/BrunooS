@@ -12,7 +12,8 @@ router = APIRouter()
 
 MULTIPLIER_PER_SECOND = 0.085
 CASHOUT_UNLOCK_MULT = 2.5
-ALLOWED_BETS = {20.0, 50.0, 100.0, 200.0, 500.0}
+ALLOWED_BETS = {30.0, 50.0, 100.0, 200.0, 500.0}
+MIN_GAME_BET = 30.0
 
 
 def is_admin_demo(user: dict) -> bool:
@@ -98,7 +99,7 @@ async def game_websocket(websocket: WebSocket):
                     continue
 
                 try:
-                    bet = float(msg.get("bet", 5))
+                    bet = float(msg.get("bet", MIN_GAME_BET))
                 except (TypeError, ValueError):
                     await websocket.send_json({
                         "type": "error",

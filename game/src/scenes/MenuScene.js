@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { W, H, BETS, state } from '../config.js';
+import { W, H, BETS, MERMAID_GAME_CONFIG, centsToMoney, moneyToCents, state } from '../config.js';
 
 export default class MenuScene extends Phaser.Scene {
   constructor() {
@@ -10,6 +10,8 @@ export default class MenuScene extends Phaser.Scene {
     this.bet = BETS[0];
     this.betButtons = [];
     this.bubbles = [];
+    this.launchLocked = false;
+    this.insufficientOverlay = null;
 
     this._drawOcean();
     this._drawReef();
@@ -96,7 +98,7 @@ export default class MenuScene extends Phaser.Scene {
     this.tweens.add({ targets: halo, scale: 1.12, alpha: 0.22, duration: 1300, yoyo: true, repeat: -1 });
     this.tweens.add({ targets: halo2, scale: 1.08, alpha: 0.1, duration: 1800, yoyo: true, repeat: -1 });
 
-    this.add.text(W / 2, 124, '🧜‍♀️', { fontSize: '74px' }).setOrigin(0.5);
+    this._drawMermaidIcon(W / 2, 140);
     this.add.text(W / 2, 198, 'SEREIA DO TESOURO', {
       fontSize: '24px',
       fontFamily: '"Arial Black", Arial, sans-serif',
@@ -164,6 +166,12 @@ export default class MenuScene extends Phaser.Scene {
       color: '#f8d66d'
     }).setOrigin(1, 0);
 
+    this.add.text(px + 18, py + 76, 'Aposta minima da Sereia: R$ ' + centsToMoney(MERMAID_GAME_CONFIG.minBetCents).toFixed(2), {
+      fontSize: '10px',
+      fontFamily: 'Arial, sans-serif',
+      color: '#9bdff0'
+    });
+
     BETS.forEach((value, index) => this._createBetChip(value, px + 18 + index * 62, py + 96));
     this._refreshBetChips();
   }
@@ -205,7 +213,7 @@ export default class MenuScene extends Phaser.Scene {
 
   _drawPlayButton() {
     const y = 520;
-    const canPlay = state.balance >= this.bet;
+    const canPlay = moneyToCents(state.balance) >= MERMAID_GAME_CONFIG.minBetCents && state.balance >= this.bet;
     const shadow = this.add.graphics();
     shadow.fillStyle(0x000000, 0.35);
     shadow.fillRoundedRect(54, y + 9, W - 108, 58, 8);
@@ -222,7 +230,7 @@ export default class MenuScene extends Phaser.Scene {
     bg.lineStyle(2, 0xffffff, 0.35);
     bg.strokeRoundedRect(44, y, W - 88, 60, 8);
 
-    const label = this.add.text(W / 2, y + 30, canPlay ? 'MERGULHAR' : 'SALDO INSUFICIENTE', {
+    const label = this.add.text(W / 2, y + 30, canPlay ? 'JOGAR R$ ' + this.bet.toFixed(2) : 'SALDO INSUFICIENTE', {
       fontSize: '20px',
       fontFamily: '"Arial Black", Arial, sans-serif',
       color: '#ffffff',
@@ -234,10 +242,12 @@ export default class MenuScene extends Phaser.Scene {
     hit.on('pointerover', () => label.setScale(1.04));
     hit.on('pointerout', () => label.setScale(1));
     hit.on('pointerdown', () => {
-      if (state.balance < this.bet) {
-        this.scene.start('Lobby', { tab: 'promo' });
+      if (this.launchLocked) return;
+      if (moneyToCents(state.balance) < MERMAID_GAME_CONFIG.minBetCents || state.balance < this.bet) {
+        this._showInsufficientBalance();
         return;
       }
+      this.launchLocked = true;
       if (document.activeElement && document.activeElement.blur) {
         document.activeElement.blur();
       }
@@ -257,6 +267,107 @@ export default class MenuScene extends Phaser.Scene {
       fontFamily: 'Arial, sans-serif',
       color: '#5f7f96'
     }).setOrigin(0.5);
+  }
+
+  _drawMermaidIcon(cx, cy) {
+    const g = this.add.graphics();
+    g.fillStyle(0x33d7ff, 0.16);
+    g.fillEllipse(cx, cy + 2, 132, 152);
+    g.fillStyle(0x5d183f, 1);
+    g.fillEllipse(cx, cy - 42, 58, 46);
+    g.fillStyle(0xf8c4b8, 1);
+    g.fillCircle(cx, cy - 42, 24);
+    g.fillGradientStyle(0xff7fb0, 0xff7fb0, 0x7434a6, 0x7434a6, 1);
+    g.fillRoundedRect(cx - 23, cy - 18, 46, 50, 16);
+    g.lineStyle(2, 0xffdf72, 0.78);
+    g.strokeRoundedRect(cx - 23, cy - 18, 46, 50, 16);
+    g.fillGradientStyle(0x45f0dd, 0x45f0dd, 0x106c89, 0x106c89, 1);
+    g.fillTriangle(cx - 16, cy + 24, cx + 16, cy + 24, cx, cy + 94);
+    g.fillStyle(0x5dffd0, 0.96);
+    g.fillTriangle(cx, cy + 90, cx - 34, cy + 116, cx - 4, cy + 100);
+    g.fillTriangle(cx, cy + 90, cx + 34, cy + 116, cx + 4, cy + 100);
+    g.fillStyle(0xffdf72, 1);
+    g.fillCircle(cx - 11, cy - 70, 3);
+    g.fillCircle(cx, cy - 74, 4);
+    g.fillCircle(cx + 11, cy - 70, 3);
+    g.fillStyle(0x27070b, 0.8);
+    g.fillCircle(cx - 7, cy - 46, 2);
+    g.fillCircle(cx + 7, cy - 46, 2);
+  }
+
+  _showInsufficientBalance() {
+    if (this.insufficientOverlay) return;
+    const minBet = centsToMoney(MERMAID_GAME_CONFIG.minBetCents);
+    const overlay = this.add.container(0, 0).setDepth(120);
+    const dim = this.add.rectangle(0, 0, W, H, 0x000510, 0.72).setOrigin(0);
+    const panel = this.add.graphics();
+    const px = 28;
+    const py = Math.max(140, H / 2 - 132);
+    const pw = W - 56;
+    const ph = 264;
+    panel.fillGradientStyle(0x10243a, 0x10243a, 0x060b18, 0x060b18, 1);
+    panel.fillRoundedRect(px, py, pw, ph, 8);
+    panel.lineStyle(2, 0xffdf72, 0.54);
+    panel.strokeRoundedRect(px, py, pw, ph, 8);
+
+    const title = this.add.text(W / 2, py + 44, 'SALDO INSUFICIENTE', {
+      fontSize: '20px',
+      fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#ffe08a',
+      stroke: '#07111c',
+      strokeThickness: 5,
+    }).setOrigin(0.5);
+    const body = this.add.text(W / 2, py + 104, [
+      'Saldo insuficiente para este jogo.',
+      'A aposta minima da Sereia e R$ ' + minBet.toFixed(2) + '.',
+    ].join('\n'), {
+      fontSize: '14px',
+      fontFamily: 'Arial, sans-serif',
+      color: '#d7fbff',
+      align: 'center',
+      lineSpacing: 7,
+      wordWrap: { width: pw - 42 },
+    }).setOrigin(0.5);
+    const deposit = this._makeModalButton(W / 2, py + 176, W - 102, 50, 'ADICIONAR SALDO', true, () => {
+      this.scene.start('Lobby', {
+        tab: 'promo',
+        notice: 'Saldo insuficiente para este jogo. A aposta minima e R$ 30,00.',
+      });
+    });
+    const close = this._makeModalButton(W / 2, py + 231, W - 102, 38, 'VOLTAR', false, () => {
+      overlay.destroy(true);
+      this.insufficientOverlay = null;
+    });
+
+    overlay.add([dim, panel, title, body, deposit.bg, deposit.label, deposit.zone, close.bg, close.label, close.zone]);
+    this.insufficientOverlay = overlay;
+  }
+
+  _makeModalButton(x, y, width, height, text, primary, handler) {
+    const bg = this.add.graphics();
+    bg.fillGradientStyle(
+      primary ? 0xffdf72 : 0x0b2138,
+      primary ? 0xffdf72 : 0x0b2138,
+      primary ? 0x25e0a7 : 0x061421,
+      primary ? 0x25e0a7 : 0x061421,
+      1
+    );
+    bg.fillRoundedRect(x - width / 2, y - height / 2, width, height, 8);
+    bg.lineStyle(1, primary ? 0xffffff : 0x7dd3fc, primary ? 0.48 : 0.26);
+    bg.strokeRoundedRect(x - width / 2, y - height / 2, width, height, 8);
+    const label = this.add.text(x, y, text, {
+      fontSize: primary ? '15px' : '12px',
+      fontFamily: '"Arial Black", Arial, sans-serif',
+      color: primary ? '#102112' : '#d7fbff',
+    }).setOrigin(0.5);
+    const zone = this.add.zone(x, y, width, height).setInteractive({ useHandCursor: true });
+    let locked = false;
+    zone.on('pointerdown', () => {
+      if (locked) return;
+      locked = true;
+      handler();
+    });
+    return { bg, label, zone };
   }
 
   _animateAmbient() {

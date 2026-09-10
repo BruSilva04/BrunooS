@@ -13,6 +13,10 @@ CREATE TABLE IF NOT EXISTS public.users (
     bonus_balance double precision NOT NULL DEFAULT 0,
     rollover_required double precision NOT NULL DEFAULT 0,
     rollover_progress double precision NOT NULL DEFAULT 0,
+    acquisition_campaign_id uuid,
+    acquisition_click_id uuid,
+    referral_code text,
+    attributed_at timestamptz,
     created_at timestamptz NOT NULL DEFAULT now(),
     updated_at timestamptz NOT NULL DEFAULT now()
 );
@@ -20,13 +24,105 @@ CREATE TABLE IF NOT EXISTS public.users (
 CREATE INDEX IF NOT EXISTS users_username_idx ON public.users (username);
 CREATE INDEX IF NOT EXISTS users_email_idx ON public.users (email);
 
+CREATE TABLE IF NOT EXISTS public.affiliates (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    name text NOT NULL,
+    handle text,
+    contact text,
+    status text NOT NULL DEFAULT 'active',
+    notes text,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS affiliates_status_idx ON public.affiliates (status);
+CREATE INDEX IF NOT EXISTS affiliates_handle_idx ON public.affiliates (handle);
+
+CREATE TABLE IF NOT EXISTS public.campaigns (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    affiliate_id uuid NOT NULL,
+    name text NOT NULL,
+    referral_code text NOT NULL,
+    status text NOT NULL DEFAULT 'active',
+    media_cost numeric(12, 2) NOT NULL DEFAULT 0,
+    starts_at timestamptz,
+    ends_at timestamptz,
+    metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS campaigns_affiliate_idx ON public.campaigns (affiliate_id);
+CREATE INDEX IF NOT EXISTS campaigns_status_idx ON public.campaigns (status);
+CREATE INDEX IF NOT EXISTS campaigns_referral_code_idx ON public.campaigns (referral_code);
+CREATE UNIQUE INDEX IF NOT EXISTS campaigns_referral_code_unique_idx
+    ON public.campaigns (lower(referral_code));
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'campaigns_affiliate_id_fkey'
+    ) THEN
+        ALTER TABLE public.campaigns
+            ADD CONSTRAINT campaigns_affiliate_id_fkey
+            FOREIGN KEY (affiliate_id) REFERENCES public.affiliates(id)
+            ON DELETE RESTRICT;
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'campaigns_referral_code_safe_chk'
+    ) THEN
+        ALTER TABLE public.campaigns
+            ADD CONSTRAINT campaigns_referral_code_safe_chk
+            CHECK (referral_code ~ '^[A-Z0-9_-]{3,40}$');
+    END IF;
+END;
+$$;
+
+CREATE TABLE IF NOT EXISTS public.acquisition_clicks (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    campaign_id uuid NOT NULL,
+    visitor_id text NOT NULL,
+    landing_path text,
+    referrer_url text,
+    utm_source text,
+    utm_medium text,
+    utm_campaign text,
+    utm_content text,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS acquisition_clicks_campaign_created_idx
+    ON public.acquisition_clicks (campaign_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS acquisition_clicks_visitor_idx
+    ON public.acquisition_clicks (visitor_id);
+CREATE INDEX IF NOT EXISTS acquisition_clicks_created_at_idx
+    ON public.acquisition_clicks (created_at DESC);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'acquisition_clicks_campaign_id_fkey'
+    ) THEN
+        ALTER TABLE public.acquisition_clicks
+            ADD CONSTRAINT acquisition_clicks_campaign_id_fkey
+            FOREIGN KEY (campaign_id) REFERENCES public.campaigns(id)
+            ON DELETE RESTRICT;
+    END IF;
+END;
+$$;
+
 ALTER TABLE public.users
     ADD COLUMN IF NOT EXISTS legal_name text,
     ADD COLUMN IF NOT EXISTS document text,
     ADD COLUMN IF NOT EXISTS document_type text NOT NULL DEFAULT 'cpf',
     ADD COLUMN IF NOT EXISTS bonus_balance double precision NOT NULL DEFAULT 0,
     ADD COLUMN IF NOT EXISTS rollover_required double precision NOT NULL DEFAULT 0,
-    ADD COLUMN IF NOT EXISTS rollover_progress double precision NOT NULL DEFAULT 0;
+    ADD COLUMN IF NOT EXISTS rollover_progress double precision NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS acquisition_campaign_id uuid,
+    ADD COLUMN IF NOT EXISTS acquisition_click_id uuid,
+    ADD COLUMN IF NOT EXISTS referral_code text,
+    ADD COLUMN IF NOT EXISTS attributed_at timestamptz;
 
 ALTER TABLE public.users
     ALTER COLUMN balance SET DEFAULT 0,
@@ -37,6 +133,38 @@ ALTER TABLE public.users
 CREATE UNIQUE INDEX IF NOT EXISTS users_document_idx
     ON public.users (document)
     WHERE document IS NOT NULL AND document <> '';
+CREATE INDEX IF NOT EXISTS users_acquisition_campaign_idx
+    ON public.users (acquisition_campaign_id);
+CREATE INDEX IF NOT EXISTS users_acquisition_click_idx
+    ON public.users (acquisition_click_id);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'users_acquisition_campaign_id_fkey'
+    ) THEN
+        ALTER TABLE public.users
+            ADD CONSTRAINT users_acquisition_campaign_id_fkey
+            FOREIGN KEY (acquisition_campaign_id) REFERENCES public.campaigns(id)
+            ON DELETE SET NULL;
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'users_acquisition_click_id_fkey'
+    ) THEN
+        ALTER TABLE public.users
+            ADD CONSTRAINT users_acquisition_click_id_fkey
+            FOREIGN KEY (acquisition_click_id) REFERENCES public.acquisition_clicks(id)
+            ON DELETE SET NULL;
+    END IF;
+END;
+$$;
+
+ALTER TABLE public.campaigns
+    ADD COLUMN IF NOT EXISTS media_cost numeric(12, 2) NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS starts_at timestamptz,
+    ADD COLUMN IF NOT EXISTS ends_at timestamptz,
+    ADD COLUMN IF NOT EXISTS metadata jsonb NOT NULL DEFAULT '{}'::jsonb;
 
 CREATE TABLE IF NOT EXISTS public.rounds (
     round_id text PRIMARY KEY,
@@ -82,6 +210,7 @@ CREATE TABLE IF NOT EXISTS public.payment_intents (
     status text NOT NULL DEFAULT 'pending',
     pix_qr_code text,
     pix_copy_paste text,
+    campaign_id uuid,
     expires_at timestamptz,
     metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
     created_at timestamptz NOT NULL DEFAULT now(),
@@ -95,6 +224,25 @@ CREATE INDEX IF NOT EXISTS payment_intents_provider_payment_idx
 CREATE UNIQUE INDEX IF NOT EXISTS payment_intents_provider_payment_unique_idx
     ON public.payment_intents (provider, provider_payment_id)
     WHERE provider_payment_id IS NOT NULL AND provider_payment_id <> '';
+
+ALTER TABLE public.payment_intents
+    ADD COLUMN IF NOT EXISTS campaign_id uuid;
+
+CREATE INDEX IF NOT EXISTS payment_intents_campaign_idx
+    ON public.payment_intents (campaign_id);
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint WHERE conname = 'payment_intents_campaign_id_fkey'
+    ) THEN
+        ALTER TABLE public.payment_intents
+            ADD CONSTRAINT payment_intents_campaign_id_fkey
+            FOREIGN KEY (campaign_id) REFERENCES public.campaigns(id)
+            ON DELETE SET NULL;
+    END IF;
+END;
+$$;
 
 CREATE TABLE IF NOT EXISTS public.withdrawal_requests (
     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -157,6 +305,9 @@ ALTER TABLE public.operator_settlements
 
 ALTER TABLE public.rounds ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.affiliates ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.campaigns ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.acquisition_clicks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.wallet_transactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.payment_intents ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.withdrawal_requests ENABLE ROW LEVEL SECURITY;
@@ -164,6 +315,9 @@ ALTER TABLE public.operator_settlements ENABLE ROW LEVEL SECURITY;
 
 GRANT ALL ON TABLE public.rounds TO service_role;
 GRANT ALL ON TABLE public.users TO service_role;
+GRANT ALL ON TABLE public.affiliates TO service_role;
+GRANT ALL ON TABLE public.campaigns TO service_role;
+GRANT ALL ON TABLE public.acquisition_clicks TO service_role;
 GRANT ALL ON TABLE public.wallet_transactions TO service_role;
 GRANT ALL ON TABLE public.payment_intents TO service_role;
 GRANT ALL ON TABLE public.withdrawal_requests TO service_role;

@@ -94,6 +94,15 @@ def require_amplopay_webhook_token() -> bool:
     return os.getenv("AMPLOPAY_REQUIRE_WEBHOOK_TOKEN", "true").lower() != "false"
 
 
+def wallet_schema_unavailable(exc: Exception) -> HTTPException:
+    error_text = str(exc)
+    if "campaign_id" in error_text or "affiliates" in error_text or "campaigns" in error_text:
+        detail = "Schema de aquisicao desatualizado. Rode backend/db/schema.sql no SQL Editor do Supabase."
+    else:
+        detail = "Falha ao acessar carteira no Supabase."
+    return HTTPException(status_code=503, detail=detail)
+
+
 def callback_url(path: str) -> str:
     base_url = (
         os.getenv("BACKEND_PUBLIC_URL")
@@ -255,7 +264,15 @@ async def deposit_intent(
     if provider == "amplopay":
         customer = await deposit_customer(user, payload)
 
-    intent = await create_payment_intent(user["id"], payload.amount, provider)
+    try:
+        intent = await create_payment_intent(
+            user["id"],
+            payload.amount,
+            provider,
+            campaign_id=user.get("acquisition_campaign_id"),
+        )
+    except Exception as exc:
+        raise wallet_schema_unavailable(exc) from exc
 
     if provider == "amplopay":
         try:

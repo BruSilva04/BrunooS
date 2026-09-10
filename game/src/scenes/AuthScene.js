@@ -1,6 +1,6 @@
 import Phaser from 'phaser';
 import { W, H } from '../config.js';
-import { login, register, setSession } from '../services/api.js';
+import { getAcquisitionForRegistration, login, register, setSession } from '../services/api.js';
 
 export default class AuthScene extends Phaser.Scene {
   constructor() {
@@ -290,6 +290,7 @@ export default class AuthScene extends Phaser.Scene {
           document,
           document_type: 'cpf',
           password,
+          ...getAcquisitionForRegistration(),
         });
 
       setSession(response.token, response.user);

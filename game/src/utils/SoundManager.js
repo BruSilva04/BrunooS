@@ -1,7 +1,18 @@
 export default class SoundManager {
   constructor() {
     this.ctx = null;
-    this.enabled = true;
+    this.enabled = window.localStorage.getItem('sereia_sound_enabled') !== 'false';
+  }
+
+  setEnabled(enabled) {
+    this.enabled = !!enabled;
+    window.localStorage.setItem('sereia_sound_enabled', this.enabled ? 'true' : 'false');
+    if (this.enabled) this._initCtx();
+  }
+
+  toggle() {
+    this.setEnabled(!this.enabled);
+    return this.enabled;
   }
 
   _initCtx() {
@@ -117,6 +128,56 @@ export default class SoundManager {
 
       osc.start(now);
       osc.stop(now + 0.35);
+    } catch (e) {}
+  }
+
+  playImpact() {
+    if (!this.enabled) return;
+    this._initCtx();
+    if (!this.ctx) return;
+
+    try {
+      const now = this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+
+      osc.type = 'square';
+      osc.frequency.setValueAtTime(210, now);
+      osc.frequency.exponentialRampToValueAtTime(80, now + 0.12);
+
+      gain.gain.setValueAtTime(0.22, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+
+      osc.start(now);
+      osc.stop(now + 0.12);
+    } catch (e) {}
+  }
+
+  playDanger() {
+    if (!this.enabled) return;
+    this._initCtx();
+    if (!this.ctx) return;
+
+    try {
+      const now = this.ctx.currentTime;
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(72, now);
+      osc.frequency.linearRampToValueAtTime(96, now + 0.18);
+
+      gain.gain.setValueAtTime(0.16, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+
+      osc.connect(gain);
+      gain.connect(this.ctx.destination);
+
+      osc.start(now);
+      osc.stop(now + 0.2);
     } catch (e) {}
   }
 }

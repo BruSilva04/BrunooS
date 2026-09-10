@@ -7,6 +7,7 @@ from fastapi import HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from routers import auth
 from routers import game
+from routers import tracking
 from routers import wallet
 from db.database import USERS_TABLE
 from db.database import get_supabase_client
@@ -50,6 +51,7 @@ app.add_middleware(
 app.include_router(game.router)
 app.include_router(auth.router)
 app.include_router(wallet.router)
+app.include_router(tracking.router)
 
 
 @app.middleware("http")
