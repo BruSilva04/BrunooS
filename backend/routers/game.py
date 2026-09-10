@@ -14,6 +14,7 @@ MULTIPLIER_PER_SECOND = 0.085
 CASHOUT_UNLOCK_MULT = 2.5
 ALLOWED_BETS = {30.0, 50.0, 100.0, 200.0, 500.0}
 MIN_GAME_BET = 30.0
+READY_TIMEOUT_SECONDS = 18.0
 
 
 def is_admin_demo(user: dict) -> bool:
@@ -36,8 +37,46 @@ def wallet_reserve_error_message(exc: Exception) -> str:
 
 
 def current_multiplier(round_state: dict) -> float:
+    if not round_state.get("started_at"):
+        return 1.0
     elapsed = max(0.0, time.monotonic() - round_state["started_at"])
     return round(1.0 + elapsed * MULTIPLIER_PER_SECOND, 3)
+
+
+async def refund_unstarted_round(round_state: dict, reason: str):
+    if round_state.get("refunded"):
+        return
+    round_state["refunded"] = True
+    round_state["status"] = "canceled"
+    await update_round(round_state["round_id"], payout=0, status="canceled")
+    if not round_state.get("bet_reserved"):
+        return
+    await adjust_user_balance(
+        round_state["user_id"],
+        round_state["bet"],
+        transaction_type="bet_refund",
+        reference_type="round",
+        reference_id=round_state["round_id"],
+        idempotency_key=f"bet_refund:{round_state['round_id']}",
+        metadata={"reason": reason},
+    )
+
+
+async def schedule_ready_timeout(websocket: WebSocket, round_state: dict):
+    try:
+        await asyncio.sleep(READY_TIMEOUT_SECONDS)
+        if round_state.get("status") != "ready":
+            return
+        await refund_unstarted_round(round_state, "begin_play_timeout")
+        await websocket.send_json({
+            "type": "round_canceled",
+            "round_id": round_state["round_id"],
+            "message": "Rodada cancelada por demora ao iniciar.",
+        })
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        round_state["status"] = "canceled"
 
 
 async def schedule_crash(websocket: WebSocket, round_state: dict):
@@ -67,6 +106,7 @@ async def game_websocket(websocket: WebSocket):
     
     active_round = None  # Current round state
     crash_task = None
+    ready_timeout_task = None
     
     try:
         while True:
@@ -75,7 +115,7 @@ async def game_websocket(websocket: WebSocket):
             action = msg.get("action")
             
             if action == "start_round":
-                if active_round and active_round["status"] == "active":
+                if active_round and active_round["status"] in {"ready", "active"}:
                     await websocket.send_json({
                         "type": "error",
                         "message": "Round already active"
@@ -126,8 +166,10 @@ async def game_websocket(websocket: WebSocket):
                     "server_seed": server_seed,
                     "server_seed_hash": seed_hash,
                     "crash_point": crash_point,
-                    "started_at": time.monotonic(),
-                    "status": "active"
+                    "started_at": None,
+                    "status": "ready",
+                    "refunded": False,
+                    "bet_reserved": False,
                 }
 
                 await save_round({
@@ -136,50 +178,94 @@ async def game_websocket(websocket: WebSocket):
                     "bet": bet,
                     "crash_point": crash_point,
                     "server_seed": server_seed,
-                    "server_seed_hash": seed_hash
+                    "server_seed_hash": seed_hash,
+                    "status": "ready",
                 })
 
-                try:
-                    charged, balance = await adjust_user_balance(
-                        user["id"],
-                        -bet,
-                        transaction_type="bet",
-                        reference_type="round",
-                        reference_id=round_id,
-                        idempotency_key=f"bet:{round_id}",
-                    )
-                except Exception as exc:
-                    await update_round(round_id, payout=0, status="canceled")
-                    active_round = None
-                    await websocket.send_json({
-                        "type": "error",
-                        "message": wallet_reserve_error_message(exc)
-                    })
-                    continue
-                if not charged:
-                    await update_round(round_id, payout=0, status="canceled")
-                    active_round = None
-                    await websocket.send_json({
-                        "type": "error",
-                        "message": "Saldo insuficiente"
-                    })
-                    continue
-                
                 await websocket.send_json({
                     "type": "round_started",
                     "round_id": round_id,
                     "server_seed_hash": seed_hash,
-                    "balance": balance,
+                    "balance": float(user.get("balance", 0) or 0),
+                    "bet_reserved": False,
                     "demo_mode": is_admin_demo(user),
                 })
 
                 if crash_task:
                     crash_task.cancel()
+                    crash_task = None
+                if ready_timeout_task:
+                    ready_timeout_task.cancel()
+                ready_timeout_task = asyncio.create_task(schedule_ready_timeout(websocket, active_round))
+
+            elif action == "begin_play":
+                if not active_round or active_round["status"] != "ready":
+                    await websocket.send_json({"type": "error", "message": "No round ready"})
+                    continue
+                if msg.get("round_id") != active_round["round_id"]:
+                    await websocket.send_json({"type": "error", "message": "Invalid round"})
+                    continue
+
+                if ready_timeout_task:
+                    ready_timeout_task.cancel()
+                    ready_timeout_task = None
+
+                try:
+                    charged, balance = await adjust_user_balance(
+                        active_round["user_id"],
+                        -active_round["bet"],
+                        transaction_type="bet",
+                        reference_type="round",
+                        reference_id=active_round["round_id"],
+                        idempotency_key=f"bet:{active_round['round_id']}",
+                    )
+                except Exception as exc:
+                    active_round["status"] = "canceled"
+                    await update_round(active_round["round_id"], payout=0, status="canceled")
+                    if ready_timeout_task:
+                        ready_timeout_task.cancel()
+                        ready_timeout_task = None
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": wallet_reserve_error_message(exc)
+                    })
+                    active_round = None
+                    continue
+                if not charged:
+                    active_round["status"] = "canceled"
+                    await update_round(active_round["round_id"], payout=0, status="canceled")
+                    if ready_timeout_task:
+                        ready_timeout_task.cancel()
+                        ready_timeout_task = None
+                    await websocket.send_json({
+                        "type": "error",
+                        "message": "Saldo insuficiente"
+                    })
+                    active_round = None
+                    continue
+
+                active_round["bet_reserved"] = True
+                active_round["started_at"] = time.monotonic()
+                active_round["status"] = "active"
+                await update_round(active_round["round_id"], status="active")
+
+                if crash_task:
+                    crash_task.cancel()
                 crash_task = asyncio.create_task(schedule_crash(websocket, active_round))
+
+                await websocket.send_json({
+                    "type": "play_started",
+                    "round_id": active_round["round_id"],
+                    "balance": balance,
+                    "server_time": time.time(),
+                })
             
             elif action == "cash_out":
                 if not active_round or active_round["status"] != "active":
                     await websocket.send_json({"type": "error", "message": "No active round"})
+                    continue
+                if msg.get("round_id") != active_round["round_id"]:
+                    await websocket.send_json({"type": "error", "message": "Invalid round"})
                     continue
                 
                 client_mult = msg.get("client_mult", 1.0)
@@ -238,10 +324,16 @@ async def game_websocket(websocket: WebSocket):
                 if crash_task:
                     crash_task.cancel()
                     crash_task = None
+                if ready_timeout_task:
+                    ready_timeout_task.cancel()
+                    ready_timeout_task = None
             
             elif action == "death":
                 if not active_round or active_round["status"] != "active":
                     await websocket.send_json({"type": "error", "message": "No active round"})
+                    continue
+                if msg.get("round_id") != active_round["round_id"]:
+                    await websocket.send_json({"type": "error", "message": "Invalid round"})
                     continue
                 
                 active_round["status"] = "lost"
@@ -258,14 +350,20 @@ async def game_websocket(websocket: WebSocket):
                 if crash_task:
                     crash_task.cancel()
                     crash_task = None
+                if ready_timeout_task:
+                    ready_timeout_task.cancel()
+                    ready_timeout_task = None
             
             elif action == "ping":
                 await websocket.send_json({"type": "pong"})
     
     except WebSocketDisconnect:
-        # If player disconnects mid-round, mark as lost
-        if active_round and active_round["status"] == "active":
+        if active_round and active_round["status"] == "ready":
+            await refund_unstarted_round(active_round, "disconnect_before_begin")
+        elif active_round and active_round["status"] == "active":
             await update_round(active_round["round_id"],
                 payout=0, status="lost")
         if crash_task:
             crash_task.cancel()
+        if ready_timeout_task:
+            ready_timeout_task.cancel()

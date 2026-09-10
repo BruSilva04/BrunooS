@@ -249,14 +249,17 @@ Fluxo:
 1. Abre WebSocket com o backend.
 2. Envia `start_round` com token e aposta.
 3. Backend valida usuario, aposta e saldo.
-4. Backend cria rodada, gera crash point e debita aposta.
+4. Backend cria rodada, gera crash point e deixa a rodada em `ready`.
 5. Backend retorna `round_started`.
 6. Cliente mostra countdown curto: `3`, `2`, `1`, `MERGULHAR`.
-7. Usuario joga em tres faixas, desvia de obstaculos, coleta tesouros visuais e decide cash out.
-8. Cash out so e permitido a partir de 2.50x.
-9. Backend valida multiplicador server-side.
-10. Resultado volta para o cliente.
-11. GameScene mostra resultado e volta para LobbyScene.
+7. Cliente envia `begin_play`.
+8. Backend debita a aposta, muda a rodada para `active` e inicia o relogio do crash.
+9. Backend retorna `play_started`.
+10. Usuario joga em tres faixas, desvia de obstaculos, coleta tesouros visuais e decide cash out.
+11. Cash out so e permitido a partir de 2.50x.
+12. Backend valida multiplicador server-side.
+13. Resultado volta para o cliente.
+14. GameScene mostra resultado e volta para LobbyScene.
 
 ---
 
@@ -446,8 +449,17 @@ Endpoint:
 ```json
 {
   "action": "start_round",
-  "bet": 20,
+  "bet": 30,
   "token": "SESSION_TOKEN"
+}
+```
+
+`begin_play`
+
+```json
+{
+  "action": "begin_play",
+  "round_id": "uuid"
 }
 ```
 
@@ -490,6 +502,29 @@ Endpoint:
   "server_seed_hash": "hash",
   "balance": 80,
   "demo_mode": false
+}
+```
+
+Observacao: neste momento a rodada existe no banco, mas a aposta ainda nao foi debitada e o relogio de crash ainda nao comecou.
+
+`play_started`
+
+```json
+{
+  "type": "play_started",
+  "round_id": "uuid",
+  "balance": 70,
+  "server_time": 1788530000
+}
+```
+
+`round_canceled`
+
+```json
+{
+  "type": "round_canceled",
+  "round_id": "uuid",
+  "message": "Rodada cancelada por demora ao iniciar."
 }
 ```
 
@@ -543,7 +578,7 @@ Endpoint:
 
 - Token de sessao e validado no backend.
 - Aposta e validada no backend.
-- Saldo e debitado no backend antes da rodada iniciar.
+- Saldo e debitado no backend somente no `begin_play`, imediatamente antes da rodada ativa comecar.
 - Multiplicador do cash out e calculado pelo servidor.
 - Crash point e gerado no servidor.
 - Cliente nao decide payout.
@@ -1108,6 +1143,7 @@ Tipos atuais esperados:
 
 - `deposit`
 - `bet`
+- `bet_refund`
 - `payout`
 - `withdrawal_hold`
 - `withdrawal_refund`
@@ -1408,6 +1444,7 @@ Lobby:
 - Bonus correto.
 - Rollover correto.
 - Historico real apos rodadas.
+- Historico e stats devem ignorar rodadas `ready/canceled` que nao chegaram a comecar.
 - Botao depositar.
 - Modal Pix.
 - Aba Promocao.
@@ -1438,7 +1475,7 @@ Jogo:
 - Toque responsivo.
 - Sem zoom quebrado.
 - Sem scroll indesejado.
-- Rodada so comeca apos `round_started`.
+- Rodada so comeca apos `play_started`.
 - Cash out so aparece/libera apos 2.50x.
 - Perda por crash mostra `A MARE VIROU`.
 - Perda por colisao so ocorre quando a sereia realmente bate.

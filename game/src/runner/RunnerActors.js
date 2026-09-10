@@ -30,7 +30,9 @@ export class RunnerMermaid {
     this.dodgeUntil = 0;
     this.animState = 'IDLE';
     this.hitRadius = 24;
+    this.baseScale = 1.12;
     this.container = scene.add.container(W / 2, H * MERMAID_GAME_CONFIG.playerYRatio).setDepth(40);
+    this.container.setScale(this.baseScale);
     this.aura = scene.add.graphics();
     this.body = scene.add.graphics();
     this.tail = scene.add.graphics();
@@ -99,7 +101,7 @@ export class RunnerMermaid {
     this._pulse(0xffdf72);
     this.scene.tweens.add({
       targets: this.container,
-      scale: { from: 1.08, to: 1 },
+      scale: { from: this.baseScale * 1.12, to: this.baseScale },
       duration: 320,
       ease: 'Back.easeOut',
     });
@@ -117,39 +119,70 @@ export class RunnerMermaid {
     this.container.angle = (this.visualLane - this.targetLane) * -8 + sway;
     this.tail.angle = Math.sin(time / 110) * 7;
     this.hair.angle = Math.sin(time / 160) * -3;
-    this.aura.clear();
-    this.aura.fillStyle(0x6fffe9, 0.15 + Math.sin(time / 180) * 0.035);
-    this.aura.fillEllipse(0, 0, 104, 128);
+    this.aura.alpha = 0.74 + Math.sin(time / 180) * 0.18;
   }
 
   _draw() {
+    this.aura.clear();
+    this.aura.fillStyle(0x6fffe9, 0.16);
+    this.aura.fillEllipse(0, 0, 112, 134);
+    this.aura.lineStyle(2, 0xffdf72, 0.12);
+    this.aura.strokeEllipse(0, 0, 78, 108);
+
     this.tail.clear();
-    this.tail.fillGradientStyle(0x45f0dd, 0x45f0dd, 0x106c89, 0x106c89, 1);
-    this.tail.fillTriangle(-12, 12, 12, 12, 0, 72);
-    this.tail.fillStyle(0x5dffd0, 0.96);
-    this.tail.fillTriangle(0, 70, -28, 94, -4, 78);
-    this.tail.fillTriangle(0, 70, 28, 94, 4, 78);
+    this.tail.fillGradientStyle(0x73ffe8, 0x73ffe8, 0x087a9c, 0x0f3867, 1);
+    this.tail.fillTriangle(-13, 6, 17, 8, 4, 78);
+    this.tail.fillStyle(0x12b9aa, 0.96);
+    this.tail.fillTriangle(-17, 23, -45, 48, -5, 36);
+    this.tail.fillTriangle(18, 24, 45, 50, 7, 37);
+    this.tail.fillStyle(0x98ffe5, 0.98);
+    this.tail.fillTriangle(3, 72, -35, 101, -6, 79);
+    this.tail.fillTriangle(4, 72, 36, 101, 10, 78);
+    this.tail.lineStyle(2, 0xd7fff8, 0.48);
+    this.tail.lineBetween(-5, 20, 1, 70);
+    this.tail.lineBetween(8, 22, 5, 72);
 
     this.body.clear();
-    this.body.fillStyle(0xf5b6a9, 1);
-    this.body.fillEllipse(0, -34, 34, 44);
-    this.body.fillGradientStyle(0xff7fb0, 0xff7fb0, 0x7434a6, 0x7434a6, 1);
-    this.body.fillRoundedRect(-19, -20, 38, 42, 16);
-    this.body.lineStyle(2, 0xffdf72, 0.78);
-    this.body.strokeRoundedRect(-19, -20, 38, 42, 16);
+    this.body.fillStyle(0xf8c4b8, 1);
+    this.body.fillEllipse(0, -32, 34, 48);
+    this.body.fillStyle(0xf6b4aa, 1);
+    this.body.fillEllipse(-20, -15, 12, 34);
+    this.body.fillEllipse(20, -15, 12, 34);
+    this.body.fillGradientStyle(0xff86b8, 0xff86b8, 0x8a36b6, 0x50237d, 1);
+    this.body.fillRoundedRect(-20, -21, 40, 43, 13);
+    this.body.fillStyle(0xffdf72, 0.9);
+    this.body.fillCircle(-9, -14, 6);
+    this.body.fillCircle(9, -14, 6);
+    this.body.lineStyle(2, 0xffdf72, 0.72);
+    this.body.strokeRoundedRect(-20, -21, 40, 43, 13);
+    this.body.lineStyle(3, 0xf6b4aa, 0.8);
+    this.body.lineBetween(-17, -18, -35, 5);
+    this.body.lineBetween(17, -18, 35, 5);
+    this.body.fillStyle(0xffffff, 0.22);
+    this.body.fillEllipse(-7, -30, 7, 18);
     this.body.fillStyle(0xffdf72, 1);
-    this.body.fillCircle(-10, -52, 3);
-    this.body.fillCircle(0, -56, 4);
-    this.body.fillCircle(10, -52, 3);
+    this.body.fillCircle(-11, -55, 3);
+    this.body.fillCircle(0, -60, 4);
+    this.body.fillCircle(11, -55, 3);
+    this.body.lineStyle(2, 0xffdf72, 0.82);
+    this.body.lineBetween(-13, -53, 0, -60);
+    this.body.lineBetween(13, -53, 0, -60);
 
     this.hair.clear();
-    this.hair.fillStyle(0x5d183f, 1);
-    this.hair.fillEllipse(0, -58, 48, 38);
+    this.hair.fillGradientStyle(0x7b184c, 0x7b184c, 0x2b0827, 0x2b0827, 1);
+    this.hair.fillEllipse(0, -60, 54, 40);
+    this.hair.fillEllipse(-20, -40, 18, 54);
+    this.hair.fillEllipse(20, -42, 16, 48);
     this.hair.fillStyle(0xf8c4b8, 1);
     this.hair.fillCircle(0, -58, 22);
-    this.hair.fillStyle(0x27070b, 0.8);
-    this.hair.fillCircle(-7, -61, 2);
-    this.hair.fillCircle(7, -61, 2);
+    this.hair.fillStyle(0x1c0615, 0.88);
+    this.hair.fillEllipse(-7, -61, 3, 5);
+    this.hair.fillEllipse(8, -61, 3, 5);
+    this.hair.lineStyle(2, 0x8a184f, 0.55);
+    this.hair.lineBetween(-16, -73, -2, -78);
+    this.hair.lineBetween(2, -78, 18, -72);
+    this.hair.fillStyle(0xffd6d0, 0.9);
+    this.hair.fillCircle(0, -53, 2);
   }
 
   _pulse(color) {
@@ -238,15 +271,16 @@ export class RunnerObstacle {
     this.type = data.type;
     this.resolved = false;
     this.container = scene.add.container(0, 0).setDepth(24);
+    this.shadow = scene.add.graphics();
     this.graphics = scene.add.graphics();
     this.label = scene.add.text(0, -42, this._avoidLabel(), {
-      fontSize: '10px',
+      fontSize: '11px',
       fontFamily: '"Arial Black", Arial, sans-serif',
       color: '#fff7dc',
       stroke: '#06111a',
       strokeThickness: 3,
     }).setOrigin(0.5);
-    this.container.add([this.graphics, this.label]);
+    this.container.add([this.shadow, this.graphics, this.label]);
     this._draw();
     this.update(0);
   }
@@ -254,42 +288,53 @@ export class RunnerObstacle {
   _avoidLabel() {
     if (this.type.avoid === 'up') return 'SUBA';
     if (this.type.avoid === 'down') return 'MERGULHE';
-    return '';
+    return this.type.severity === 'hard' ? 'DESVIE' : 'MUDE';
   }
 
   _draw() {
     const c = this.type.color;
     const a = this.type.accent;
+    const hard = this.type.severity === 'hard';
+    this.shadow.clear();
+    this.shadow.fillStyle(hard ? 0xff334a : 0x8fffe7, hard ? 0.18 : 0.12);
+    this.shadow.fillEllipse(0, 20, 96, 46);
+    this.shadow.lineStyle(2, hard ? 0xffdf72 : 0xd7fbff, hard ? 0.28 : 0.18);
+    this.shadow.strokeEllipse(0, 20, 106, 52);
+
     this.graphics.clear();
 
     if (this.type.key === 'JELLYFISH') {
-      this.graphics.fillStyle(c, 0.86);
-      this.graphics.fillEllipse(0, -8, 58, 40);
+      this.graphics.fillStyle(c, 0.90);
+      this.graphics.fillEllipse(0, -11, 66, 44);
+      this.graphics.fillStyle(0xffffff, 0.24);
+      this.graphics.fillEllipse(-10, -20, 22, 10);
       this.graphics.lineStyle(3, a, 0.65);
-      [-18, -6, 8, 20].forEach((x) => {
+      [-22, -9, 6, 21].forEach((x) => {
         this.graphics.beginPath();
-        this.graphics.moveTo(x, 10);
-        this.graphics.lineTo(x - 8, 38);
+        this.graphics.moveTo(x, 8);
+        this.graphics.lineTo(x - 8, 42);
         this.graphics.strokePath();
       });
       return;
     }
 
     if (this.type.key === 'ANCHOR') {
-      this.graphics.lineStyle(7, c, 0.96);
+      this.graphics.lineStyle(8, c, 0.98);
       this.graphics.lineBetween(0, -52, 0, 24);
-      this.graphics.lineBetween(-28, 22, 28, 22);
+      this.graphics.lineBetween(-33, 22, 33, 22);
       this.graphics.strokeCircle(0, -56, 9);
-      this.graphics.lineStyle(3, a, 0.65);
-      this.graphics.strokeCircle(0, 24, 28);
+      this.graphics.lineStyle(4, a, 0.72);
+      this.graphics.strokeCircle(0, 24, 31);
+      this.graphics.fillStyle(0xffdf72, 0.8);
+      this.graphics.fillCircle(0, -9, 4);
       return;
     }
 
     if (this.type.key === 'TENTACLE') {
-      this.graphics.lineStyle(13, c, 0.92);
+      this.graphics.lineStyle(15, c, 0.94);
       this.graphics.beginPath();
-      this.graphics.moveTo(-34, 46);
-      this.graphics.quadraticCurveTo(-8, 4, 28, -20);
+      this.graphics.moveTo(-38, 48);
+      this.graphics.quadraticCurveTo(-8, 2, 30, -23);
       this.graphics.strokePath();
       this.graphics.fillStyle(a, 0.8);
       this.graphics.fillCircle(10, 6, 4);
@@ -298,51 +343,61 @@ export class RunnerObstacle {
     }
 
     if (this.type.key === 'FISH_SCHOOL') {
-      [-22, 0, 24, 12, -10].forEach((x, index) => {
+      [-28, -4, 25, 13, -15].forEach((x, index) => {
         const y = -18 + index * 10;
         this.graphics.fillStyle(index % 2 ? c : a, 0.86);
-        this.graphics.fillEllipse(x, y, 26, 12);
-        this.graphics.fillTriangle(x - 14, y, x - 24, y - 8, x - 24, y + 8);
+        this.graphics.fillEllipse(x, y, 30, 14);
+        this.graphics.fillTriangle(x - 16, y, x - 28, y - 9, x - 28, y + 9);
+        this.graphics.fillStyle(0x06111a, 0.65);
+        this.graphics.fillCircle(x + 8, y - 2, 2);
       });
       return;
     }
 
     if (this.type.key === 'COLUMN') {
       this.graphics.fillGradientStyle(c, c, 0x3d2f29, 0x3d2f29, 1);
-      this.graphics.fillRoundedRect(-28, -58, 56, 116, 8);
+      this.graphics.fillRoundedRect(-31, -62, 62, 124, 8);
       this.graphics.fillStyle(a, 0.70);
-      this.graphics.fillRect(-34, -62, 68, 12);
-      this.graphics.fillRect(-34, 50, 68, 12);
+      this.graphics.fillRect(-38, -66, 76, 13);
+      this.graphics.fillRect(-38, 53, 76, 13);
+      this.graphics.lineStyle(2, 0xffffff, 0.18);
+      this.graphics.lineBetween(-14, -48, -14, 44);
+      this.graphics.lineBetween(14, -48, 14, 44);
       return;
     }
 
     if (this.type.key === 'SEA_MINE') {
       this.graphics.fillStyle(c, 0.96);
-      this.graphics.fillCircle(0, 0, 34);
+      this.graphics.fillCircle(0, 0, 37);
+      this.graphics.fillStyle(0xff7181, 0.22);
+      this.graphics.fillCircle(-9, -12, 15);
       this.graphics.lineStyle(4, a, 0.86);
       for (let i = 0; i < 8; i++) {
         const angle = (Math.PI * 2 / 8) * i;
-        this.graphics.lineBetween(Math.cos(angle) * 30, Math.sin(angle) * 30, Math.cos(angle) * 48, Math.sin(angle) * 48);
+        this.graphics.lineBetween(Math.cos(angle) * 31, Math.sin(angle) * 31, Math.cos(angle) * 51, Math.sin(angle) * 51);
       }
       return;
     }
 
     if (this.type.key === 'SHIP_WRECK') {
       this.graphics.fillStyle(c, 0.96);
-      this.graphics.fillRoundedRect(-42, -18, 84, 48, 8);
-      this.graphics.lineStyle(3, a, 0.60);
-      this.graphics.lineBetween(-36, -20, 28, -48);
-      this.graphics.lineBetween(8, -46, 46, -12);
+      this.graphics.fillRoundedRect(-48, -20, 96, 52, 8);
+      this.graphics.fillStyle(0x2a1510, 0.72);
+      this.graphics.fillRect(-34, -6, 68, 9);
+      this.graphics.lineStyle(4, a, 0.66);
+      this.graphics.lineBetween(-40, -22, 30, -52);
+      this.graphics.lineBetween(8, -50, 52, -12);
       return;
     }
 
     if (this.type.key === 'CORAL') {
-      this.graphics.lineStyle(9, c, 0.94);
-      this.graphics.lineBetween(0, 48, 0, -30);
-      this.graphics.lineBetween(0, 6, -26, -18);
-      this.graphics.lineBetween(0, 18, 28, -4);
+      this.graphics.lineStyle(11, c, 0.96);
+      this.graphics.lineBetween(0, 50, 0, -34);
+      this.graphics.lineBetween(0, 7, -31, -20);
+      this.graphics.lineBetween(0, 20, 33, -6);
       this.graphics.lineStyle(4, a, 0.62);
-      this.graphics.lineBetween(-26, -18, -34, -34);
+      this.graphics.lineBetween(-31, -20, -40, -38);
+      this.graphics.lineBetween(33, -6, 45, -22);
       return;
     }
 
@@ -358,11 +413,11 @@ export class RunnerObstacle {
     this.container.setScale(scale);
     this.container.setDepth(18 + Math.round((1 - this.z) * 20));
     this.container.angle = Math.sin(time / 260 + this.lane) * 2;
-    this.label.setVisible(this.type.avoid !== 'lane' && this.z < 0.34 && this.z > 0.06);
+    this.label.setVisible(this.z < 0.42 && this.z > 0.02);
   }
 
   shouldResolve() {
-    return !this.resolved && this.z <= 0.095 && this.z >= -0.08;
+    return !this.resolved && this.z <= 0.07 && this.z >= -0.035;
   }
 
   isOffscreen() {

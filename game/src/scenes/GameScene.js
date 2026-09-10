@@ -69,6 +69,10 @@ export default class GameScene extends Phaser.Scene {
     this.sharkDistance = MERMAID_GAME_CONFIG.sharkSafeDistance;
     this.lastSoftHitAt = -Infinity;
     this.lastDangerSoundAt = 0;
+    this.lastWorldDrawAt = -Infinity;
+    this.lastWorldBiome = '';
+    this.lastSpeedLineDrawAt = -Infinity;
+    this.speedLinesActive = false;
     this.spawnAccumulator = 0;
     this.treasureAccumulator = 0;
     this.bubbleAccumulator = 0;
@@ -191,7 +195,7 @@ export default class GameScene extends Phaser.Scene {
   }
 
   _createAmbientBubbles() {
-    for (let i = 0; i < 26; i++) {
+    for (let i = 0; i < MERMAID_GAME_CONFIG.ambientBubbleCount; i++) {
       const bubble = this.add.circle(
         Phaser.Math.Between(0, W),
         Phaser.Math.Between(0, H),
@@ -217,51 +221,66 @@ export default class GameScene extends Phaser.Scene {
       abyss: { top: 0x021329, mid: 0x010917, bottom: 0x000308, glow: 0x8d5cff },
     }[biome] || { top: 0x0757a8, mid: 0x033767, bottom: 0x020c24, glow: 0x6fffe9 };
 
-    this.bg.clear();
-    this.bg.fillGradientStyle(palette.top, palette.top, palette.mid, palette.bottom, 1);
-    this.bg.fillRect(0, 0, W, H);
+    const shouldRedrawWorld = biome !== this.lastWorldBiome
+      || time - this.lastWorldDrawAt >= MERMAID_GAME_CONFIG.worldRedrawIntervalMs;
 
-    const horizon = H * MERMAID_GAME_CONFIG.horizonYRatio;
-    if (biome === 'reef') {
-      for (let i = 0; i < 5; i++) {
-        const x = 18 + i * 88 + Math.sin(time / 1800 + i) * 12;
-        this.bg.fillStyle(0x9df8ff, 0.035);
-        this.bg.fillTriangle(x - 18, 0, x + 30, 0, x + Math.sin(time / 1000 + i) * 45, H * 0.7);
+    if (shouldRedrawWorld) {
+      this.lastWorldBiome = biome;
+      this.lastWorldDrawAt = time;
+
+      this.bg.clear();
+      this.bg.fillGradientStyle(palette.top, palette.top, palette.mid, palette.bottom, 1);
+      this.bg.fillRect(0, 0, W, H);
+
+      const horizon = H * MERMAID_GAME_CONFIG.horizonYRatio;
+      if (biome === 'reef') {
+        for (let i = 0; i < 5; i++) {
+          const x = 18 + i * 88 + Math.sin(time / 1800 + i) * 12;
+          this.bg.fillStyle(0x9df8ff, 0.035);
+          this.bg.fillTriangle(x - 18, 0, x + 30, 0, x + Math.sin(time / 1000 + i) * 45, H * 0.7);
+        }
+      }
+
+      this.mid.clear();
+      this._drawBiomeSilhouettes(time, biome, palette);
+
+      this.track.clear();
+      const leftFar = W / 2 - 34;
+      const rightFar = W / 2 + 34;
+      const leftNear = laneToX(-1, 0) - 96;
+      const rightNear = laneToX(1, 0) + 96;
+      this.track.fillStyle(0x07263a, 0.38);
+      this.track.beginPath();
+      this.track.moveTo(leftFar, horizon + 10);
+      this.track.lineTo(rightFar, horizon + 10);
+      this.track.lineTo(rightNear, H + 40);
+      this.track.lineTo(leftNear, H + 40);
+      this.track.closePath();
+      this.track.fillPath();
+
+      [-0.5, 0.5].forEach((lane, index) => {
+        const pulse = 0.18 + Math.sin(time / 360 + index) * 0.045;
+        this.track.lineStyle(2, palette.glow, pulse);
+        this.track.lineBetween(laneToX(lane, 0.94), trackY(0.94), laneToX(lane, -0.02), H + 12);
+      });
+
+      for (let z = 0.15; z <= 0.92; z += 0.18) {
+        const y = trackY(z);
+        const spread = 138 * (1 - z);
+        this.track.lineStyle(1, palette.glow, 0.08);
+        this.track.lineBetween(W / 2 - spread, y, W / 2 + spread, y);
       }
     }
 
-    this.mid.clear();
-    this._drawBiomeSilhouettes(time, biome, palette);
+    this._drawSpeedLines(time);
+  }
 
-    this.track.clear();
-    const leftFar = W / 2 - 34;
-    const rightFar = W / 2 + 34;
-    const leftNear = laneToX(-1, 0) - 96;
-    const rightNear = laneToX(1, 0) + 96;
-    this.track.fillStyle(0x07263a, 0.38);
-    this.track.beginPath();
-    this.track.moveTo(leftFar, horizon + 10);
-    this.track.lineTo(rightFar, horizon + 10);
-    this.track.lineTo(rightNear, H + 40);
-    this.track.lineTo(leftNear, H + 40);
-    this.track.closePath();
-    this.track.fillPath();
-
-    [-0.5, 0.5].forEach((lane, index) => {
-      const pulse = 0.18 + Math.sin(time / 360 + index) * 0.045;
-      this.track.lineStyle(2, palette.glow, pulse);
-      this.track.lineBetween(laneToX(lane, 0.94), trackY(0.94), laneToX(lane, -0.02), H + 12);
-    });
-
-    for (let z = 0.15; z <= 0.92; z += 0.18) {
-      const y = trackY(z);
-      const spread = 138 * (1 - z);
-      this.track.lineStyle(1, palette.glow, 0.08);
-      this.track.lineBetween(W / 2 - spread, y, W / 2 + spread, y);
-    }
-
-    this.speedLines.clear();
+  _drawSpeedLines(time) {
     if (!this.reducedMotion && [ROUND_STATES.PLAYING, ROUND_STATES.SHARK_WARNING].includes(this.roundState)) {
+      if (time - this.lastSpeedLineDrawAt < MERMAID_GAME_CONFIG.speedLineIntervalMs) return;
+      this.lastSpeedLineDrawAt = time;
+      this.speedLinesActive = true;
+      this.speedLines.clear();
       const intensity = Phaser.Math.Clamp((this.mult - 1) / 3, 0.12, 0.48);
       this.speedLines.lineStyle(1, 0xd7fbff, intensity);
       for (let i = 0; i < 9; i++) {
@@ -269,6 +288,9 @@ export default class GameScene extends Phaser.Scene {
         const y = H * 0.2 + ((i * 61 + time / 6) % (H * 0.66));
         this.speedLines.lineBetween(x, y, x - 8, y + 38);
       }
+    } else if (this.speedLinesActive) {
+      this.speedLinesActive = false;
+      this.speedLines.clear();
     }
   }
 
@@ -506,15 +528,31 @@ export default class GameScene extends Phaser.Scene {
     if (data.type === 'round_started') {
       this.roundId = data.round_id;
       this.serverSeedHash = data.server_seed_hash;
-      this.betDebitedByServer = true;
+      this.betDebitedByServer = !!data.bet_reserved;
       this.demoMode = !!data.demo_mode;
       if (Number.isFinite(data.balance)) walletState.balance = data.balance;
       if (this.startTimeout) {
         this.startTimeout.destroy();
         this.startTimeout = null;
       }
-      this.roundStartedAt = this.time.now;
       this._beginCountdown();
+      return;
+    }
+
+    if (data.type === 'play_started') {
+      if (data.round_id && data.round_id !== this.roundId) {
+        this._handleServerError('Rodada invalida recebida do servidor.');
+        return;
+      }
+      this.betDebitedByServer = true;
+      if (Number.isFinite(data.balance)) walletState.balance = data.balance;
+      this.roundStartedAt = this.time.now;
+      this._beginGameplay();
+      return;
+    }
+
+    if (data.type === 'round_canceled') {
+      this._handleServerError(data.message || 'Rodada cancelada antes de iniciar.');
       return;
     }
 
@@ -556,11 +594,24 @@ export default class GameScene extends Phaser.Scene {
     this.roundTimers.push(this.time.delayedCall(steps.length * MERMAID_GAME_CONFIG.countdownStepMs, () => {
       if (this.roundState !== ROUND_STATES.COUNTDOWN) return;
       this.hud.hideCountdown();
-      this._beginGameplay();
+      this._requestPlayStart();
+    }));
+  }
+
+  _requestPlayStart() {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN || !this.roundId) {
+      this._handleServerError('Rodada sem confirmacao do servidor.');
+      return;
+    }
+    this.hud.setStatus('SINCRONIZANDO...');
+    this.ws.send(JSON.stringify({
+      action: 'begin_play',
+      round_id: this.roundId,
     }));
   }
 
   _beginGameplay() {
+    if (this.roundState === ROUND_STATES.PLAYING || this.resultShown) return;
     this.spawnAccumulator = 380;
     this.treasureAccumulator = 260;
     this._setRoundState(ROUND_STATES.PLAYING, this.demoMode ? 'CONTA DEMO' : 'FUJA DO TUBARAO');
@@ -980,7 +1031,7 @@ export default class GameScene extends Phaser.Scene {
 
     if ([ROUND_STATES.PLAYING, ROUND_STATES.SHARK_WARNING].includes(this.roundState)) {
       this.bubbleAccumulator += dt * 1000;
-      if (this.bubbleAccumulator > 90) {
+      if (this.bubbleAccumulator > MERMAID_GAME_CONFIG.bubbleTrailIntervalMs) {
         this.bubbleAccumulator = 0;
         this._emitBubbleTrail(this.player.container.x, this.player.container.y + 28);
       }
@@ -1008,9 +1059,10 @@ export default class GameScene extends Phaser.Scene {
   }
 
   _emitImpact(x, y) {
-    for (let i = 0; i < 10; i++) {
+    const count = MERMAID_GAME_CONFIG.impactParticleCount;
+    for (let i = 0; i < count; i++) {
       const particle = this.add.circle(x, y, Phaser.Math.Between(2, 5), 0xff9da5, 0.75).setDepth(80);
-      const angle = (Math.PI * 2 / 10) * i;
+      const angle = (Math.PI * 2 / count) * i;
       const dist = Phaser.Math.Between(28, 68);
       this.tweens.add({
         targets: particle,
@@ -1026,14 +1078,15 @@ export default class GameScene extends Phaser.Scene {
   }
 
   _emitTreasureBurst(x, y) {
-    for (let i = 0; i < 10; i++) {
+    const count = MERMAID_GAME_CONFIG.treasureParticleCount;
+    for (let i = 0; i < count; i++) {
       const gem = this.add.graphics().setDepth(78);
       gem.fillStyle(i % 2 ? 0xffdf72 : 0x8fffe7, 0.84);
       gem.fillTriangle(0, -7, 7, 0, 0, 8);
       gem.fillTriangle(0, -7, 0, 8, -7, 0);
       gem.x = x;
       gem.y = y;
-      const angle = (Math.PI * 2 / 10) * i;
+      const angle = (Math.PI * 2 / count) * i;
       const dist = Phaser.Math.Between(36, 82);
       this.tweens.add({
         targets: gem,
@@ -1051,7 +1104,7 @@ export default class GameScene extends Phaser.Scene {
 
   _emitCashoutShower() {
     if (this.reducedMotion) return;
-    for (let i = 0; i < 26; i++) {
+    for (let i = 0; i < MERMAID_GAME_CONFIG.cashoutParticleCount; i++) {
       this.time.delayedCall(i * 28, () => {
         const x = Phaser.Math.Between(34, W - 34);
         const coin = this.add.graphics().setDepth(136);

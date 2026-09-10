@@ -1476,12 +1476,17 @@ async def get_lobby_snapshot(user_id: str) -> dict[str, Any] | None:
 
     response = await anyio.to_thread.run_sync(fetch_rounds)
     rounds = response.data or []
-    won_rounds = [round_data for round_data in rounds if round_data.get("status") == "won"]
-    max_mult = max([_round_multiplier(round_data) for round_data in rounds], default=1.0)
-    win_rate = round((len(won_rounds) / len(rounds)) * 100) if rounds else 0
+    played_rounds = [
+        round_data
+        for round_data in rounds
+        if round_data.get("status") in {"won", "lost"}
+    ]
+    won_rounds = [round_data for round_data in played_rounds if round_data.get("status") == "won"]
+    max_mult = max([_round_multiplier(round_data) for round_data in played_rounds], default=1.0)
+    win_rate = round((len(won_rounds) / len(played_rounds)) * 100) if played_rounds else 0
 
     history = []
-    for round_data in rounds[:6]:
+    for round_data in played_rounds[:6]:
         won = round_data.get("status") == "won"
         bet = float(round_data.get("bet", 0) or 0)
         payout = float(round_data.get("payout", 0) or 0)
@@ -1512,7 +1517,7 @@ async def get_lobby_snapshot(user_id: str) -> dict[str, Any] | None:
         "bonus_balance": float(user.get("bonus_balance", 0) or 0),
         "rollover": rollover_status(user),
         "stats": {
-            "rounds": len(rounds),
+            "rounds": len(played_rounds),
             "maxMult": round(max_mult, 2),
             "winRate": win_rate,
         },

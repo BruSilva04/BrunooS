@@ -23,6 +23,12 @@ export default class RunnerHUD {
     this.cashoutUnlocked = false;
     this.cashoutPending = false;
     this.resultOverlay = null;
+    this.lastMultText = '';
+    this.lastDepthText = '';
+    this.lastValueText = '';
+    this.lastCashoutValueText = '';
+    this.lastStatusText = '';
+    this.lastChromeBucket = null;
 
     this.root = scene.add.container(0, 0).setDepth(90);
     this.topGfx = scene.add.graphics();
@@ -136,11 +142,32 @@ export default class RunnerHUD {
 
   update({ mult, depth, biome, sharkDistance, stateName }) {
     const potential = this.bet * mult;
-    this.multText.setText(`${Number(mult || 1).toFixed(2)}x`);
-    this.depthText.setText(`${Math.max(0, Math.round(depth || 0))} m  |  ${(biome?.label || 'RECIFE')}`);
-    this.valueText.setText(money(potential));
-    this.cashoutValue.setText(money(potential));
-    this._drawChrome(sharkDistance);
+    const multText = `${Number(mult || 1).toFixed(2)}x`;
+    const depthText = `${Math.max(0, Math.round(depth || 0))} m  |  ${(biome?.label || 'RECIFE')}`;
+    const valueText = money(potential);
+    if (multText !== this.lastMultText) {
+      this.lastMultText = multText;
+      this.multText.setText(multText);
+    }
+    if (depthText !== this.lastDepthText) {
+      this.lastDepthText = depthText;
+      this.depthText.setText(depthText);
+    }
+    if (valueText !== this.lastValueText) {
+      this.lastValueText = valueText;
+      this.valueText.setText(valueText);
+    }
+    if (valueText !== this.lastCashoutValueText) {
+      this.lastCashoutValueText = valueText;
+      this.cashoutValue.setText(valueText);
+    }
+
+    const danger = 1 - Math.max(0, Math.min(1, sharkDistance));
+    const chromeBucket = Math.round(danger * 12);
+    if (chromeBucket !== this.lastChromeBucket) {
+      this.lastChromeBucket = chromeBucket;
+      this._drawChrome(sharkDistance);
+    }
 
     const unlocked = mult >= CASHOUT_UNLOCK_MULT;
     if (unlocked && !this.cashoutUnlocked) {
@@ -157,14 +184,20 @@ export default class RunnerHUD {
     }
 
     if (!unlocked) {
-      this.statusText.setText(stateName === 'COUNTDOWN' ? 'AGUARDE O SINAL' : 'MANTENHA A ROTA');
+      this._setStatusText(stateName === 'COUNTDOWN' ? 'AGUARDE O SINAL' : 'MANTENHA A ROTA');
     } else if (this.cashoutPending) {
-      this.statusText.setText('CONFIRMANDO RESGATE...');
+      this._setStatusText('CONFIRMANDO RESGATE...');
     }
   }
 
   setStatus(message) {
-    this.statusText.setText(message || '');
+    this._setStatusText(message || '');
+  }
+
+  _setStatusText(message) {
+    if (message === this.lastStatusText) return;
+    this.lastStatusText = message;
+    this.statusText.setText(message);
   }
 
   setCashoutPending(pending) {
