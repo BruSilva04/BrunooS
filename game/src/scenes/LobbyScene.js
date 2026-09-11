@@ -144,8 +144,8 @@ export default class LobbyScene extends Phaser.Scene {
 
       <button class="promo-strip" type="button" data-tab="promo">
         <span>EXCLUSIVO</span>
-        <strong>Mergulho Premiado</strong>
-        <em>95%<small>RTP</small></em>
+        <strong>Block Game Demo</strong>
+        <em>8x8<small>PUZZLE</small></em>
       </button>
 
       <nav class="category-row" aria-label="Categorias">
@@ -163,10 +163,10 @@ export default class LobbyScene extends Phaser.Scene {
         </div>
         <div class="game-info">
           <h2>Sereia do Tesouro</h2>
-          <p>Runner crash &middot; Cash Out</p>
+          <p>Puzzle de blocos &middot; Modo demo</p>
           <div class="badges">
-            <span>AO VIVO</span>
-            <span>UNICO JOGO</span>
+            <span>DEMO</span>
+            <span>8X8</span>
           </div>
           <button class="play-btn" type="button" data-action="play">JOGAR AGORA</button>
         </div>

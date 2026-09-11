@@ -1,6 +1,6 @@
 # Sereia do Tesouro - Documento Mestre
 
-Ultima atualizacao: 2026-09-10
+Ultima atualizacao: 2026-09-11
 
 Este documento consolida o estado atual do projeto, a arquitetura tecnica, as regras de jogo/carteira, os pontos de seguranca e um brief comercial para usar em outra conversa sobre a criacao de uma agencia que vendera/licenciara o jogo para influenciadores.
 
@@ -10,7 +10,7 @@ Importante: este arquivo nao deve conter senhas, chaves de API, secrets, CPF com
 
 ## 1. Resumo Executivo
 
-Sereia do Tesouro e um jogo de cassino arcade mobile-first para web. O produto mistura runner subaquatico, mecanica de cash out e economia com saldo Pix. A jogadora controla uma sereia que nada desviando de obstaculos, coleta diamantes e acompanha um multiplicador crescente. O objetivo e sacar antes da rodada quebrar ou antes de bater.
+Sereia do Tesouro e um jogo de cassino arcade mobile-first para web. A plataforma ja possui lobby, login, carteira Pix e historico reais. O gameplay ativo em 2026-09-11 virou um prototipo demo chamado internamente de Block Game: um puzzle 8x8 com pecas geometricas, drag and drop, clears de linhas/colunas e resgate visual apos progresso minimo.
 
 O projeto ja esta funcional com:
 
@@ -29,11 +29,12 @@ O projeto ja esta funcional com:
 - Rollover.
 - Bonus de deposito.
 - Conta admin/demo.
+- Prototipo Block Game em modo demo, sem movimentar saldo real.
 - Deploy atual: Vercel para frontend e Render para backend.
 
 O produto ainda precisa de QA final em dispositivos reais, arte final proprietaria, fluxo completo de afiliados/influenciadores e revisao operacional antes de trafego pago.
 
-Nota de produto: em 2026-09-10, o runner novo em tres faixas foi pausado porque a sensacao visual/gameplay ainda nao ficou boa. A experiencia ativa voltou temporariamente para o jogo classico de toque/flap, obstaculos laterais, diamantes e cash out. Os arquivos do runner novo continuam no repositorio em `game/src/runner/*` para referencia futura, mas nao sao a experiencia principal enquanto uma nova direcao de jogo e definida.
+Nota de produto: em 2026-09-11, o jogo classico de toque/flap e o runner em tres faixas foram pausados para teste de uma nova direcao. A experiencia ativa em `GameScene` agora e o Block Game em modo demo. Ele nao usa WebSocket financeiro, nao debita aposta e nao credita payout real. O objetivo desta fase e validar sensacao mobile, tamanho do tabuleiro, drag/drop, dificuldade e interesse do jogador antes de conectar ao backend financeiro.
 
 ---
 
@@ -135,6 +136,8 @@ BrunooS/
         AdminDashboardScene.js
         MenuScene.js
         GameScene.js
+      block/
+        BlockPuzzleLogic.js
       objects/
         Mermaid.js
         Obstacle.js
@@ -143,6 +146,8 @@ BrunooS/
         ParticleEffects.js
       utils/
         SoundManager.js
+    tests/
+      blockPuzzleLogic.test.mjs
 
   backend/
     main.py
@@ -248,20 +253,20 @@ Cena principal do jogo.
 
 Fluxo:
 
-1. Abre WebSocket com o backend.
-2. Envia `start_round` com token e aposta.
-3. Backend valida usuario, aposta e saldo.
-4. Backend cria rodada, gera crash point e deixa a rodada em `ready`.
-5. Backend retorna `round_started`.
-6. Cliente mostra countdown curto: `3`, `2`, `1`, `MERGULHAR`.
-7. Cliente envia `begin_play`.
-8. Backend debita a aposta, muda a rodada para `active` e inicia o relogio do crash.
-9. Backend retorna `play_started`.
-10. Usuario joga tocando para nadar, passa por obstaculos laterais, coleta diamantes visuais e decide cash out.
-11. Cash out so e permitido a partir de 2.50x.
-12. Backend valida multiplicador server-side.
-13. Resultado volta para o cliente.
-14. GameScene mostra resultado e volta para LobbyScene.
+1. Recebe a aposta escolhida em `MenuScene`.
+2. Inicia o prototipo Block Game em modo demo.
+3. Cria tabuleiro 8x8.
+4. Gera tres pecas disponiveis.
+5. Jogador arrasta e solta pecas no tabuleiro.
+6. Posicao valida ocupa celulas; posicao invalida retorna para a area inferior.
+7. Linhas e colunas completas sao removidas com animacao.
+8. Cada linha/coluna removida aumenta `totalClears`.
+9. Ao chegar em 3 clears, o botao de resgate demo libera.
+10. Se todas as tres pecas forem usadas, gera novo batch.
+11. Se nenhuma das pecas restantes couber no tabuleiro, a rodada termina.
+12. Resultado demo aparece e o jogador pode repetir ou voltar ao LobbyScene.
+
+Observacao financeira: nesta fase, `GameScene` nao abre WebSocket, nao debita saldo real e nao registra rodada real. A aposta e o valor exibidos sao simulados para validar gameplay.
 
 ---
 
@@ -270,71 +275,91 @@ Fluxo:
 ### Core loop
 
 ```text
-Escolher aposta -> reservar rodada no backend -> iniciar mergulho -> toque/flap -> multiplicador sobe -> cash out ou derrota -> lobby
+Escolher aposta -> abrir Block Game demo -> posicionar pecas -> limpar linhas/colunas -> resgatar demo ou perder por falta de movimentos -> lobby
 ```
 
 ### Controle
 
-Estado ativo temporario:
+Estado ativo:
 
-- Mobile: toque na tela faz a sereia subir.
-- Desktop QA: barra de espaco faz a sereia subir.
-- A gravidade puxa a sereia para baixo.
-- Inputs ficam bloqueados antes de `play_started`, durante cashout pendente e estados finais.
+- Mobile: tocar, segurar e arrastar a peca.
+- Desktop QA: mouse tambem funciona pelo mesmo sistema de pointer.
+- A peca acompanha o dedo com offset vertical para nao ficar escondida.
+- Durante o drag, o tabuleiro mostra preview de posicao valida ou invalida.
+- Inputs ficam bloqueados durante animacao de clear, cashout pendente e estados finais.
 
-### Obstaculos
+### Tabuleiro
 
-Estado ativo temporario:
+- 8 linhas x 8 colunas.
+- Estado interno simples: `board[row][column]`.
+- Cada celula pode estar vazia ou preenchida.
+- Visual premium com fundo escuro, dourado, aqua e brilho discreto.
 
-- Obstaculos entram pela direita e caminham para a esquerda.
-- Cada obstaculo cria uma abertura vertical segura.
-- Colisao acontece se a sereia encostar na zona superior ou inferior fora da abertura.
-- O jogo antigo e mais simples e deve ser usado enquanto a nova direcao de gameplay e definida.
-- O runner em tres faixas fica pausado/arquivado para futura revisao.
+### Pecas
+
+- Sempre existem tres pecas disponiveis por ciclo.
+- O jogador pode usar em qualquer ordem.
+- Quando uma peca e usada, ela sai da area inferior.
+- Quando as tres sao usadas, novas tres pecas sao geradas.
+- A geracao considera `difficultyTier` e garante que pelo menos uma peca do batch tenha movimento valido sempre que possivel.
+
+Pecas atuais:
+
+- 1 bloco.
+- 2 horizontal.
+- 2 vertical.
+- 3 horizontal.
+- 3 vertical.
+- Quadrado 2x2.
+- L pequeno.
+- 4 horizontal.
+- 4 vertical.
+- 3x2.
+- T.
+- Z.
+- Z invertido.
+- L maior.
+- Linha de 5.
+- Plus.
+- Formas maiores de tier 4.
+
+### Clears
+
+- Linha completa remove as 8 celulas da linha.
+- Coluna completa remove as 8 celulas da coluna.
+- Linha + coluna na mesma jogada conta como +2 clears.
+- Multiplo clear exibe feedback visual.
 
 ### Tesouros
 
-Tesouros aparecem durante a rodada.
-
-Ao coletar:
-
-- Toca som.
-- Emite particulas.
-- Nao altera saldo real.
-- Nao altera payout oficial.
-- Nao altera multiplicador financeiro sem regra de backend.
+Tesouros e diamantes do runner/flap antigo estao pausados. No Block Game, os blocos e clears assumem o papel visual de recompensa.
 
 ### Tubarao perseguidor
 
-O tubarao perseguidor existia no runner em tres faixas, mas esta pausado junto com esse modo. A experiencia ativa temporaria nao usa `sharkDistance`; derrota ocorre por crash server-side, colisao com obstaculo ou sair da area segura.
+O tubarao perseguidor existia no runner em tres faixas, mas esta pausado junto com esse modo. A experiencia ativa nao usa `sharkDistance`.
 
-### Multiplicador
+### Valor demo
 
-No cliente:
+No prototipo Block Game:
 
-- `MULT_TICK = 0.0085` a cada 100ms.
-- Aproximadamente `0.085x` por segundo.
-
-No servidor:
-
-- `MULTIPLIER_PER_SECOND = 0.085`.
-- O servidor usa o proprio relogio para validar cash out.
+- Valor inicial = aposta x 1.00.
+- Cada clear aumenta o valor visual.
+- Cada jogada aumenta levemente o valor visual.
+- Limite demo atual: `maxDemoMultiplier = 8`.
+- Nenhum valor e liquidado no backend nesta fase.
 
 ### Cash out
 
-- Aparece/libera somente a partir de 2.50x.
-- O cliente pode pedir cash out, mas o servidor decide se e valido.
-- Pagamento = aposta x multiplicador server-side.
+- Botao existe desde o inicio, mas fica bloqueado.
+- Libera apos 3 linhas/colunas completas.
+- Depois de liberado, o jogador pode resgatar demo ou continuar.
+- Cashout real deve ser conectado ao backend somente apos aprovacao da gameplay.
 
 ### Derrotas
 
-Tipos principais:
+Derrota acontece somente quando nenhuma das pecas disponiveis pode ser posicionada em nenhuma celula valida do tabuleiro.
 
-- Crash server-side: a rodada quebrou antes do cash out. No HUD aparece `A MARE VIROU`.
-- Colisao hard com obstaculo.
-- Conexao: WebSocket caiu no meio da rodada.
-
-Observacao importante para QA: se a derrota mostrar `A MARE VIROU`, nao foi parede invisivel; foi crash da rodada. Se mostrar colisao sem obstaculo visivel perto da sereia, entao ainda existe problema de hitbox/camera para revisar.
+Regra essencial: se uma peca nao cabe, mas outra das tres cabe, o jogo continua.
 
 ---
 
@@ -342,28 +367,30 @@ Observacao importante para QA: se a derrota mostrar `A MARE VIROU`, nao foi pare
 
 ### Usuario comum
 
-Para usuario comum, a dificuldade aumenta com o multiplicador:
+No Block Game, a dificuldade aumenta por `difficultyTier`, calculado a partir de `totalClears` e quantidade de jogadas.
 
-- Velocidade base visual no jogo classico: `baseSpeed = 170`.
-- A velocidade cresce com o multiplicador.
-- Obstaculos ficam mais frequentes em marcos de multiplicador.
-- A profundidade visual deriva do multiplicador.
+Tiers:
+
+- Tier 1: pecas simples, como 1 bloco, 2H, 2V, 3H, 3V e 2x2.
+- Tier 2: adiciona L pequeno, pecas de 4 blocos e 3x2.
+- Tier 3: adiciona T, Z, L maior e linhas de 5.
+- Tier 4: adiciona formas maiores e menos flexiveis.
+
+Configuracao central:
 
 ```text
-speed = baseSpeed + (multiplier - 1) * 58
+BLOCK_GAME_CONFIG.difficulty = {
+  easyUntil: 3,
+  mediumUntil: 6,
+  hardUntil: 9
+}
 ```
 
-Os biomas do runner novo estao pausados junto com o modo de tres faixas.
+O jogo nao deve gerar pecas impossiveis de proposito. A geracao tenta entregar um batch com pelo menos uma jogada valida sempre que houver espaco possivel.
 
 ### Admin/demo
 
-Conta admin entra como modo demo.
-
-Para admin:
-
-- Velocidade permanece em `baseSpeed`.
-- Frequencia de obstaculo permanece estavel.
-- Objetivo e demonstracao/teste, nao jogo real.
+Nesta fase, todos os usuarios jogam o Block Game em modo demo. Admin continua util para teste operacional da plataforma, mas o prototipo nao diferencia velocidade, payout ou saldo por role.
 
 ---
 
@@ -425,6 +452,8 @@ Endpoint:
 ```text
 /ws/game
 ```
+
+Status atual: o WebSocket continua implementado no backend para o modelo de rodada cashout/crash anterior, mas o prototipo Block Game de fase 1 nao usa esse endpoint. A integracao financeira do Block Game deve ser feita em uma fase posterior, com backend autoritativo para aposta, saldo, geracao/seed de rodada, cashout e liquidacao.
 
 ### Mensagens do cliente
 
@@ -1373,7 +1402,7 @@ Observacao:
 - `AUTH_SECRET` deve ser forte e diferente da chave Supabase em producao.
 - `ALLOW_VERCEL_PREVIEWS=true` permite qualquer preview Vercel por regex. Para producao fechada, considerar `false`.
 - Rate limit atual e em memoria. Em producao com trafego, usar Redis/Upstash ou outro storage compartilhado.
-- WebSocket aceita `death` do cliente. Para anti-cheat completo, validar colisao/input server-side.
+- Block Game ainda esta em demo. Antes de dinheiro real, backend deve validar aposta, saldo, seed da rodada, pecas geradas, movimentos e cashout.
 - Admin deve ser tratado como conta operacional/demo. Antes de producao aberta, revisar se admin pode ou nao solicitar saque comum.
 - Criar alertas para picos de saque, chargeback, erro de webhook e saldo provider baixo.
 
@@ -1456,16 +1485,19 @@ Saque:
 Jogo:
 
 - Tela cheia em celular.
-- Toque responsivo.
+- Drag/drop responsivo.
 - Sem zoom quebrado.
 - Sem scroll indesejado.
-- Rodada so comeca apos `play_started`.
-- Cash out so aparece/libera apos 2.50x.
-- Perda por crash mostra `A MARE VIROU`.
-- Perda por colisao so ocorre quando a sereia realmente bate.
-- Admin/demo com velocidade estavel.
-- Usuario comum com velocidade aumentando.
-- Reconexao/queda de WebSocket.
+- Tabuleiro ocupa bem a largura em 375x812, 390x844, 393x852 e 430x932.
+- Pecas nao ficam escondidas atras do dedo.
+- Preview valido/invalido aparece durante o drag.
+- Peca invalida retorna suavemente.
+- Linha completa desaparece.
+- Coluna completa desaparece.
+- Linha + coluna simultaneas contam +2.
+- Resgate demo libera apos 3 clears.
+- Game over so acontece quando nenhuma peca restante couber.
+- Nenhum saldo real muda no prototipo demo.
 
 Performance:
 
@@ -1481,7 +1513,15 @@ Performance:
 
 ### Completo ou funcional
 
-- Jogo principal.
+- Prototipo Block Game demo jogavel.
+- Tabuleiro 8x8.
+- Tres pecas por ciclo.
+- Drag/drop com offset mobile.
+- Preview de placement valido/invalido.
+- Clear de linha, coluna e linha+coluna.
+- Desbloqueio de resgate demo apos 3 clears.
+- Game over quando nenhuma das pecas restantes cabe.
+- Testes unitarios das regras do puzzle.
 - Fluxo de cenas.
 - Login/cadastro.
 - Lobby real.
@@ -1505,14 +1545,16 @@ Performance:
 - Painel admin de aquisicao.
 - CRUD basico de influenciadores e campanhas.
 - Exportacao CSV de campanhas.
-- Testes basicos de casino e wallet rules.
+- Testes basicos de casino, wallet rules e tracking.
 
 ### Em polimento
 
 - Qualidade visual do lobby/auth em todos os celulares.
-- Ajuste fino de hitbox/colisao.
-- Feedback visual de crash/colisao.
-- Fluxo de reconexao.
+- Qualidade visual final do Block Game.
+- Sensacao do drag/drop em iPhone e Android reais.
+- Balanceamento de dificuldade do puzzle.
+- Feedback visual de combo e game over.
+- Adapter backend para transformar o Block Game demo em rodada financeira real.
 
 ### Falta para produto final
 
@@ -1524,6 +1566,9 @@ Performance:
 - Audio final.
 - Logo final.
 - Banners finais.
+- Backend autoritativo especifico para Block Game.
+- Persistencia de rodada Block Game.
+- Liquidacao financeira real do cashout Block Game.
 - Painel admin visual.
 - Dashboard financeiro.
 - Dashboard para influenciador.
@@ -1532,7 +1577,7 @@ Performance:
 - Sistema de whitelist/limites operacionais.
 - Monitoramento e alertas.
 - Testes E2E automatizados.
-- Anti-cheat mais forte para colisao/input.
+- Anti-cheat/validacao server-side para movimentos do Block Game.
 
 ---
 
@@ -1554,7 +1599,8 @@ Um cassino arcade de uma unica experiencia, com:
 - Saldo.
 - Bonus.
 - Rollover.
-- Jogo crash/arcade.
+- Prototipo Block Game demo.
+- Backend financeiro pronto para futura liquidacao real.
 - Historico.
 - Perfil.
 - Saque Pix.
@@ -1661,14 +1707,14 @@ Fase 3:
 - Criar dashboard admin financeiro.
 - Garantir que saldo provider cobre saques.
 
-### Prioridade 2 - Anti-cheat
+### Prioridade 2 - Anti-cheat Block Game
 
-- Tornar obstaculos deterministicos por seed.
+- Tornar pecas deterministicamente geradas por seed server-side.
 - Guardar seed da rodada.
-- Enviar inputs do cliente.
-- Validar mortes/cashout com tolerancia.
-- Detectar cliente sem colisao.
-- Bloquear cashout impossivel.
+- Enviar movimentos do cliente para o backend.
+- Validar placement, clears e game over server-side.
+- Bloquear cashout se progresso real for menor que 3 clears.
+- Liquidar payout apenas a partir do estado validado no servidor.
 
 ### Prioridade 3 - UX mobile final
 
@@ -1709,14 +1755,14 @@ Use este bloco para abrir outra conversa sobre a agencia:
 ```text
 Estou criando uma agencia/plataforma para vender/licenciar um jogo de cassino mobile-first para influenciadores.
 
-O produto inicial se chama Sereia do Tesouro / Sereia Palace. No estado atual temporario, e um jogo web de cassino arcade com toque/flap, sereia, obstaculos laterais, diamantes visuais, multiplicador crescente e cash out. O usuario acessa pelo celular, faz cadastro/login, deposita via Pix, escolhe aposta minima de R$ 30 no jogo da Sereia e joga. O deposito minimo da plataforma continua R$ 20. O cash out so libera a partir de 2.50x. A direcao do gameplay ainda sera reavaliada antes da arte final.
+O produto inicial se chama Sereia do Tesouro / Sereia Palace. A plataforma web mobile-first ja possui login, cadastro, lobby, carteira, Pix, historico, bonus, rollover e painel admin. No estado atual temporario, o gameplay ativo e um prototipo demo chamado internamente de Block Game: tabuleiro 8x8, tres pecas por ciclo, drag/drop, limpeza de linhas/colunas, dificuldade progressiva e resgate visual apos 3 clears. O deposito minimo da plataforma continua R$ 20 e a aposta minima do jogo segue configurada em R$ 30. Nesta fase, o Block Game nao debita saldo real nem credita payout real; a conexao financeira deve vir depois que a gameplay for aprovada.
 
 Stack atual:
 - Frontend/jogo: Phaser 3 + Vite.
 - Backend: FastAPI.
 - Banco: Supabase/Postgres.
 - Pagamentos: Amplopay Pix.
-- Realtime: WebSocket /ws/game.
+- Realtime: WebSocket /ws/game ja existe para o motor anterior, mas o Block Game demo ainda nao usa.
 - Deploy: Vercel frontend e Render backend.
 
 O jogo ja tem:
@@ -1729,8 +1775,8 @@ O jogo ja tem:
 - Bonus de 100% para depositos a partir de R$ 100.
 - Rollover 2x sobre o credito total.
 - Conta admin/demo.
-- RTP alvo aproximado de 95%.
-- Motor server-side com provably fair/HMAC.
+- RTP alvo aproximado de 95% no motor server-side anterior.
+- Motor server-side com provably fair/HMAC preservado para futura adaptacao.
 - Tracking first-touch por influenciador/campanha.
 - Painel admin para criar influenciadores e campanhas.
 - Metricas de campanha: cliques, cadastros, depositantes, FTD, depositos, GGR, CAC e resultado bruto da midia.
@@ -1767,6 +1813,9 @@ uvicorn main:app --reload
 ### Testes
 
 ```bash
+cd game
+npm run test:block
+cd ..
 python backend/tests/test_wallet_rules.py
 python backend/tests/test_casino.py
 python -m compileall backend
@@ -1806,8 +1855,10 @@ Frontend:
 - `game/src/scenes/AuthScene.js`: login/cadastro.
 - `game/src/scenes/LobbyScene.js`: lobby, promocao, perfil, deposito e saque.
 - `game/src/scenes/MenuScene.js`: escolha de aposta.
-- `game/src/scenes/GameScene.js`: gameplay classico temporario, estados e WebSocket.
-- `game/src/objects/*`: objetos ativos do jogo classico temporario.
+- `game/src/scenes/GameScene.js`: prototipo Block Game em modo demo.
+- `game/src/block/BlockPuzzleLogic.js`: regras puras do puzzle, geracao de pecas, clears e game over.
+- `game/tests/blockPuzzleLogic.test.mjs`: testes unitarios das regras do puzzle.
+- `game/src/objects/*`: objetos do jogo classico/flap pausado; manter como referencia.
 - `game/src/runner/ObstacleDirector.js`: runner pausado; manter como referencia enquanto a nova direcao e definida.
 - `game/src/runner/RunnerActors.js`: runner pausado; atores vetoriais nao usados no gameplay ativo.
 - `game/src/runner/RunnerHUD.js`: runner pausado; HUD nao usado no gameplay ativo.

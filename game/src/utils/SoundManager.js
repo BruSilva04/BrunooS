@@ -180,4 +180,28 @@ export default class SoundManager {
       osc.stop(now + 0.2);
     } catch (e) {}
   }
+
+  playPickPiece() {
+    this.playSwim();
+  }
+
+  playPlacePiece() {
+    this.playGem();
+  }
+
+  playInvalidPlace() {
+    this.playImpact();
+  }
+
+  playClearLine() {
+    this.playCashout();
+  }
+
+  playCashoutUnlocked() {
+    this.playCashout();
+  }
+
+  playGameOver() {
+    this.playCrash();
+  }
 }

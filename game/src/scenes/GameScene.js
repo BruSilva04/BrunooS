@@ -1,46 +1,117 @@
 import Phaser from 'phaser';
-import { W, H, OBS_DELAY_START, GEM_DELAY, MULT_TICK, GEM_BONUS, CASHOUT_UNLOCK_MULT, WS_URL, state, addHistory } from '../config.js';
-import Mermaid from '../objects/Mermaid.js';
-import Obstacle from '../objects/Obstacle.js';
-import Gem from '../objects/Gem.js';
-import HUD from '../objects/HUD.js';
+import {
+  W,
+  H,
+  BLOCK_GAME_CONFIG,
+  state,
+  centsToMoney,
+} from '../config.js';
 import SoundManager from '../utils/SoundManager.js';
-import ParticleEffects from '../objects/ParticleEffects.js';
-import { clearSession, getAuthToken } from '../services/api.js';
+import {
+  canPlacePiece,
+  createEmptyBoard,
+  difficultyTierFor,
+  generateThreePieces,
+  getPieceBounds,
+  hasAnyMove,
+  resolvePlacement,
+} from '../block/BlockPuzzleLogic.js';
+
+const TUTORIAL_KEY = 'sereia_block_tutorial_seen';
+
+const GAME_STATE = {
+  STARTING: 'STARTING',
+  PLAYING: 'PLAYING',
+  ANIMATING_CLEAR: 'ANIMATING_CLEAR',
+  CASHOUT_AVAILABLE: 'CASHOUT_AVAILABLE',
+  CASHOUT_PENDING: 'CASHOUT_PENDING',
+  CASHED_OUT: 'CASHED_OUT',
+  GAME_OVER: 'GAME_OVER',
+  ERROR: 'ERROR',
+};
+
+const THEME = {
+  red: 0x9f1426,
+  redSoft: 0xe11d48,
+  redDeep: 0x4a0612,
+  panel: 0x080711,
+  panel2: 0x150b18,
+  gold: 0xffdf72,
+  gold2: 0xd59d19,
+  aqua: 0x8fffe7,
+  cyan: 0x7dd3fc,
+  white: 0xffffff,
+};
+
+function money(value) {
+  return `R$ ${Number(value || 0).toFixed(2)}`;
+}
+
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function uniqueCells(rows, columns, size) {
+  const cells = new Map();
+  rows.forEach((row) => {
+    for (let col = 0; col < size; col += 1) {
+      cells.set(`${row}:${col}`, [row, col]);
+    }
+  });
+  columns.forEach((col) => {
+    for (let row = 0; row < size; row += 1) {
+      cells.set(`${row}:${col}`, [row, col]);
+    }
+  });
+  return [...cells.values()];
+}
 
 export default class GameScene extends Phaser.Scene {
-  constructor() { 
-    super({ key: 'Game' }); 
+  constructor() {
+    super({ key: 'Game' });
   }
 
-  init(data) {
-    this.bet    = data.bet;
-    this.mult   = 1.00;
-    this.dead   = false;
-    this.cashed = false;
-    this.baseSpeed = 170;
-    this.speed  = this.baseSpeed;
-    this.demoMode = false;
-    this._obs   = [];
-    this._gems  = [];
-    this._bubs  = [];
-    this.ws     = null;
-    this.roundId = null;
+  init(data = {}) {
+    const minBet = centsToMoney(BLOCK_GAME_CONFIG.minimumBetCents);
+    this.bet = Math.max(minBet, Number(data.bet || minBet));
+    this.board = createEmptyBoard();
+    this.availablePieces = [];
+    this.pieceViews = [];
+    this.drag = null;
+    this.totalClears = 0;
+    this.bestCombo = 0;
+    this.moves = 0;
+    this.difficultyTier = 1;
+    this.cashoutUnlocked = false;
+    this.gameState = GAME_STATE.STARTING;
     this.resultShown = false;
-    this.betDebitedByServer = false;
-    this.lossReason = 'crash';
-    this.roundReady = false;
-    this.gameplayStarted = false;
-    this.startFailureShown = false;
-    this._startTimeout = null;
-    this._statusText = null;
-    this._tObs = null;
-    this._tGem = null;
-    this._tBub = null;
-    this._tMult = null;
+    this.toast = null;
   }
 
   create() {
+    this._syncViewport();
+    [120, 360, 700].forEach((delay) => {
+      this.time.delayedCall(delay, () => this._syncViewport());
+    });
+
+    this.sounds = new SoundManager();
+    this._createLayout();
+    this._drawBackground();
+    this._createHud();
+    this._createBoard();
+    this._createPieceLayer();
+    this._createCashoutButton();
+    this._installInput();
+    this._startDemoRound();
+
+    if (!this._tutorialSeen()) {
+      this._showTutorial();
+    }
+
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this._cleanup());
+  }
+
+  _syncViewport() {
     if (document.activeElement && document.activeElement.blur) {
       document.activeElement.blur();
     }
@@ -48,507 +119,759 @@ export default class GameScene extends Phaser.Scene {
       window.sereiaSyncViewport();
     }
     this.scale.refresh();
-    [120, 360, 700].forEach((delay) => {
-      this.time.delayedCall(delay, () => {
-        if (window.sereiaSyncViewport) {
-          window.sereiaSyncViewport();
-        }
-        this.scale.refresh();
+  }
+
+  _createLayout() {
+    const boardMax = Math.min(W - 28, Math.round(H * 0.49));
+    this.boardPx = clamp(boardMax, 316, W - 28);
+    this.boardX = Math.round((W - this.boardPx) / 2);
+    this.boardY = Math.round(clamp(H * 0.155, 108, 146));
+
+    if (this.boardY + this.boardPx > H - 214) {
+      this.boardY = Math.max(102, Math.round(H - 214 - this.boardPx));
+    }
+
+    this.cellGap = 4;
+    this.cellSize = (this.boardPx - this.cellGap * (BLOCK_GAME_CONFIG.boardSize + 1)) / BLOCK_GAME_CONFIG.boardSize;
+    this.cellStep = this.cellSize + this.cellGap;
+    this.pieceUnit = clamp(Math.round(W / 17), 20, 24);
+    this.pieceY = Math.min(H - 142, this.boardY + this.boardPx + 54);
+    this.cashoutY = H - 62;
+  }
+
+  _drawBackground() {
+    const g = this.add.graphics();
+    g.fillGradientStyle(0x210007, 0x210007, 0x02040f, 0x02040f, 1);
+    g.fillRect(0, 0, W, H);
+
+    g.fillStyle(0x9f1426, 0.18);
+    g.fillCircle(W - 42, 78, 86);
+    g.fillStyle(0x0e5468, 0.24);
+    g.fillCircle(28, H * 0.42, 98);
+    g.fillStyle(0xd59d19, 0.08);
+    g.fillCircle(W / 2, H - 68, 148);
+
+    for (let i = 0; i < 18; i += 1) {
+      const x = Phaser.Math.Between(14, W - 14);
+      const y = Phaser.Math.Between(20, H - 84);
+      const size = Phaser.Math.Between(1, 3);
+      const dot = this.add.circle(x, y, size, THEME.cyan, Phaser.Math.FloatBetween(0.07, 0.18));
+      this.tweens.add({
+        targets: dot,
+        y: y - Phaser.Math.Between(12, 34),
+        alpha: Phaser.Math.FloatBetween(0.04, 0.20),
+        duration: Phaser.Math.Between(1500, 3200),
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.inOut',
+      });
+    }
+  }
+
+  _createHud() {
+    const panel = this.add.graphics();
+    panel.fillGradientStyle(0x150711, 0x150711, 0x090710, 0x090710, 1);
+    panel.fillRoundedRect(12, 12, W - 24, 90, 10);
+    panel.lineStyle(1, THEME.gold, 0.38);
+    panel.strokeRoundedRect(12, 12, W - 24, 90, 10);
+
+    this.add.text(28, 24, 'SALDO', {
+      fontSize: '10px',
+      fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#f4c84a',
+    });
+    this.add.text(28, 40, money(state.balance), {
+      fontSize: '17px',
+      fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#fff7dc',
+    });
+
+    this.add.text(W - 28, 24, 'APOSTA', {
+      fontSize: '10px',
+      fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#f4c84a',
+    }).setOrigin(1, 0);
+    this.add.text(W - 28, 40, money(this.bet), {
+      fontSize: '17px',
+      fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#fff7dc',
+    }).setOrigin(1, 0);
+
+    this.add.text(W / 2, 26, 'VALOR DEMO', {
+      fontSize: '10px',
+      fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#8fffe7',
+    }).setOrigin(0.5, 0);
+    this.valueText = this.add.text(W / 2, 42, money(this._currentValue()), {
+      fontSize: '24px',
+      fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#ffdf72',
+      stroke: '#4a0612',
+      strokeThickness: 4,
+    }).setOrigin(0.5, 0);
+
+    this.progressText = this.add.text(W / 2, 76, '', {
+      fontSize: '12px',
+      fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#d7fbff',
+    }).setOrigin(0.5, 0);
+
+    this.modeText = this.add.text(W / 2, 106, 'PROTOTIPO: sem debito ou credito real', {
+      fontSize: '10px',
+      fontFamily: 'Arial, sans-serif',
+      color: '#dca197',
+    }).setOrigin(0.5, 0);
+  }
+
+  _createBoard() {
+    this.boardBaseGfx = this.add.graphics();
+    this.blockGfx = this.add.graphics().setDepth(12);
+    this.ghostGfx = this.add.graphics().setDepth(14);
+    this.clearLayer = this.add.container(0, 0).setDepth(18);
+    this._drawBoardBase();
+    this._drawBlocks();
+  }
+
+  _drawBoardBase() {
+    const g = this.boardBaseGfx;
+    const pad = 8;
+    g.clear();
+    g.fillStyle(0x000000, 0.24);
+    g.fillRoundedRect(this.boardX - 4, this.boardY + 8, this.boardPx + 8, this.boardPx + 8, 12);
+    g.fillGradientStyle(0x170b18, 0x170b18, 0x050710, 0x050710, 1);
+    g.fillRoundedRect(this.boardX - pad, this.boardY - pad, this.boardPx + pad * 2, this.boardPx + pad * 2, 12);
+    g.lineStyle(2, THEME.gold, 0.52);
+    g.strokeRoundedRect(this.boardX - pad, this.boardY - pad, this.boardPx + pad * 2, this.boardPx + pad * 2, 12);
+
+    for (let row = 0; row < BLOCK_GAME_CONFIG.boardSize; row += 1) {
+      for (let col = 0; col < BLOCK_GAME_CONFIG.boardSize; col += 1) {
+        const { x, y } = this._cellRect(row, col);
+        const tint = (row + col) % 2 === 0 ? 0x17111d : 0x201321;
+        g.fillStyle(tint, 0.98);
+        g.fillRoundedRect(x, y, this.cellSize, this.cellSize, 6);
+        g.lineStyle(1, 0xffdf72, 0.06);
+        g.strokeRoundedRect(x, y, this.cellSize, this.cellSize, 6);
+      }
+    }
+  }
+
+  _createPieceLayer() {
+    this.rackGfx = this.add.graphics();
+    this.rackGfx.fillStyle(0x080711, 0.84);
+    this.rackGfx.fillRoundedRect(14, this.pieceY - 58, W - 28, 116, 10);
+    this.rackGfx.lineStyle(1, 0x70421e, 0.62);
+    this.rackGfx.strokeRoundedRect(14, this.pieceY - 58, W - 28, 116, 10);
+    this.add.text(W / 2, this.pieceY - 50, 'PECAS DISPONIVEIS', {
+      fontSize: '11px',
+      fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#ffdf72',
+    }).setOrigin(0.5, 0);
+  }
+
+  _createCashoutButton() {
+    this.cashoutGfx = this.add.graphics().setDepth(30);
+    this.cashoutLabel = this.add.text(W / 2, this.cashoutY - 8, '', {
+      fontSize: '17px',
+      fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#fff7dc',
+      stroke: '#4a0612',
+      strokeThickness: 4,
+    }).setOrigin(0.5).setDepth(31);
+    this.cashoutSub = this.add.text(W / 2, this.cashoutY + 14, '', {
+      fontSize: '10px',
+      fontFamily: 'Arial, sans-serif',
+      color: '#ffe8ac',
+    }).setOrigin(0.5).setDepth(31);
+    this.cashoutZone = this.add.zone(W / 2, this.cashoutY, W - 40, 58)
+      .setInteractive({ useHandCursor: true })
+      .setDepth(32);
+    this.cashoutZone.on('pointerdown', () => this._cashOut());
+    this._drawCashoutButton();
+  }
+
+  _installInput() {
+    this.input.on('pointermove', (pointer) => this._updateDrag(pointer));
+    this.input.on('pointerup', (pointer) => this._endDrag(pointer));
+    this.input.on('pointerupoutside', (pointer) => this._endDrag(pointer));
+    this.input.on('gameout', () => this._endDrag(null));
+  }
+
+  _startDemoRound() {
+    this.board = createEmptyBoard();
+    this.totalClears = 0;
+    this.bestCombo = 0;
+    this.moves = 0;
+    this.cashoutUnlocked = false;
+    this.resultShown = false;
+    this.gameState = GAME_STATE.PLAYING;
+    this._generateBatch();
+    this._updateHud();
+    this._drawCashoutButton();
+  }
+
+  _generateBatch() {
+    this.difficultyTier = difficultyTierFor({
+      totalClears: this.totalClears,
+      moves: this.moves,
+    });
+    this.availablePieces = generateThreePieces({
+      board: this.board,
+      difficultyTier: this.difficultyTier,
+    });
+    this._renderPieces();
+    return this.availablePieces.length > 0 && hasAnyMove(this.board, this.availablePieces);
+  }
+
+  _renderPieces() {
+    this.pieceViews.forEach((view) => {
+      if (view?.container) view.container.destroy(true);
+    });
+    this.pieceViews = [];
+
+    const slotWidth = W / BLOCK_GAME_CONFIG.piecesPerBatch;
+    this.availablePieces.forEach((piece, index) => {
+      const homeX = Math.round(slotWidth * (index + 0.5));
+      const homeY = this.pieceY + 14;
+      const container = this.add.container(homeX, homeY).setDepth(22);
+      const shadow = this.add.graphics();
+      shadow.setPosition(4, 7);
+      this._drawPieceGraphic(shadow, piece, this.pieceUnit, 0x000000, 0.26);
+
+      const gfx = this.add.graphics();
+      this._drawPieceGraphic(gfx, piece, this.pieceUnit);
+
+      const zone = this.add.zone(0, 0, 116, 96)
+        .setInteractive({ useHandCursor: true });
+      container.add([shadow, gfx, zone]);
+
+      const view = {
+        piece,
+        container,
+        gfx,
+        shadow,
+        zone,
+        homeX,
+        homeY,
+      };
+      zone.on('pointerdown', (pointer) => this._startDrag(pointer, index));
+      this.pieceViews.push(view);
+    });
+  }
+
+  _drawPieceGraphic(graphics, piece, unit, overrideColor = null, alpha = 1) {
+    const gap = 4;
+    const bounds = getPieceBounds(piece);
+    const width = bounds.cols * unit + Math.max(0, bounds.cols - 1) * gap;
+    const height = bounds.rows * unit + Math.max(0, bounds.rows - 1) * gap;
+    const startX = -width / 2;
+    const startY = -height / 2;
+
+    graphics.clear();
+    piece.coords.forEach(([row, col]) => {
+      const x = startX + col * (unit + gap);
+      const y = startY + row * (unit + gap);
+      graphics.fillStyle(overrideColor || piece.color, alpha);
+      graphics.fillRoundedRect(x, y, unit, unit, 6);
+      if (!overrideColor) {
+        graphics.fillStyle(0xffffff, 0.18);
+        graphics.fillRoundedRect(x + 3, y + 3, unit - 6, Math.max(4, unit * 0.28), 4);
+        graphics.lineStyle(1, 0xffffff, 0.24);
+        graphics.strokeRoundedRect(x, y, unit, unit, 6);
+      }
+    });
+  }
+
+  _startDrag(pointer, index) {
+    if (!this._canPlayInput()) return;
+    const view = this.pieceViews[index];
+    if (!view || view.piece.used) return;
+
+    this.drag = {
+      view,
+      pointerId: pointer.id,
+      offset: clamp(Math.round(H * 0.078), BLOCK_GAME_CONFIG.dragOffsetMin, BLOCK_GAME_CONFIG.dragOffsetMax),
+      candidate: null,
+    };
+
+    view.container.setDepth(42);
+    view.container.setScale(1.12);
+    this.sounds.playPickPiece();
+    this._haptic(8);
+    this._updateDrag(pointer);
+  }
+
+  _updateDrag(pointer) {
+    if (!this.drag || !pointer || pointer.id !== this.drag.pointerId) return;
+    const { view, offset } = this.drag;
+    view.container.setPosition(pointer.x, pointer.y - offset);
+
+    const candidate = this._candidateForPiece(view.piece, view.container.x, view.container.y);
+    this.drag.candidate = candidate;
+    this._drawGhost(view.piece, candidate);
+  }
+
+  _endDrag(pointer) {
+    if (!this.drag) return;
+    if (pointer && pointer.id !== this.drag.pointerId) return;
+
+    const { view, candidate } = this.drag;
+    this._clearDrag();
+
+    if (candidate?.valid) {
+      this._placePiece(view.piece, candidate.row, candidate.col, view);
+      return;
+    }
+
+    this.sounds.playInvalidPlace();
+    this._haptic(12);
+    this.tweens.add({
+      targets: view.container,
+      x: view.homeX,
+      y: view.homeY,
+      scale: 1,
+      duration: 180,
+      ease: 'Cubic.easeOut',
+      onComplete: () => view.container.setDepth(22),
+    });
+  }
+
+  _candidateForPiece(piece, centerX, centerY) {
+    const bounds = getPieceBounds(piece);
+    const pieceWidth = bounds.cols * this.cellStep - this.cellGap;
+    const pieceHeight = bounds.rows * this.cellStep - this.cellGap;
+    const topLeftX = centerX - pieceWidth / 2;
+    const topLeftY = centerY - pieceHeight / 2;
+    const col = Math.round((topLeftX - (this.boardX + this.cellGap)) / this.cellStep);
+    const row = Math.round((topLeftY - (this.boardY + this.cellGap)) / this.cellStep);
+    return {
+      row,
+      col,
+      valid: canPlacePiece(this.board, piece, row, col),
+    };
+  }
+
+  _drawGhost(piece, candidate) {
+    this.ghostGfx.clear();
+    if (!candidate) return;
+
+    const color = candidate.valid ? THEME.aqua : THEME.redSoft;
+    const alpha = candidate.valid ? 0.42 : 0.28;
+    piece.coords.forEach(([rowOffset, colOffset]) => {
+      const row = candidate.row + rowOffset;
+      const col = candidate.col + colOffset;
+      if (row < 0 || col < 0 || row >= BLOCK_GAME_CONFIG.boardSize || col >= BLOCK_GAME_CONFIG.boardSize) return;
+      const { x, y } = this._cellRect(row, col);
+      this.ghostGfx.fillStyle(color, alpha);
+      this.ghostGfx.fillRoundedRect(x, y, this.cellSize, this.cellSize, 6);
+      this.ghostGfx.lineStyle(2, color, 0.75);
+      this.ghostGfx.strokeRoundedRect(x + 1, y + 1, this.cellSize - 2, this.cellSize - 2, 6);
+    });
+  }
+
+  _placePiece(piece, row, col, view) {
+    const placement = resolvePlacement(this.board, piece, row, col);
+    if (!placement.ok) return;
+
+    piece.used = true;
+    this.moves += 1;
+    this.bestCombo = Math.max(this.bestCombo, placement.clearCount);
+    this.totalClears += placement.clearCount;
+    this.board = placement.placedBoard;
+    view.container.destroy(true);
+    view.container = null;
+    this.sounds.playPlacePiece();
+    this._haptic(10);
+    this._drawBlocks();
+    this._updateHud();
+
+    if (placement.clearCount > 0) {
+      this.gameState = GAME_STATE.ANIMATING_CLEAR;
+      this.sounds.playClearLine();
+      this._haptic(placement.clearCount >= 2 ? [20, 30, 20] : 18);
+      this._animateClear(placement.rows, placement.columns, () => {
+        this.board = placement.board;
+        this.gameState = this.cashoutUnlocked ? GAME_STATE.CASHOUT_AVAILABLE : GAME_STATE.PLAYING;
+        this._drawBlocks();
+        this._afterMove(placement.clearCount);
+      });
+      return;
+    }
+
+    this._afterMove(0);
+  }
+
+  _afterMove(clearCount) {
+    if (!this.cashoutUnlocked && this.totalClears >= BLOCK_GAME_CONFIG.clearsToUnlockCashout) {
+      this.cashoutUnlocked = true;
+      this.gameState = GAME_STATE.CASHOUT_AVAILABLE;
+      this.sounds.playCashoutUnlocked();
+      this._haptic([18, 28, 18]);
+      this._showToast('RESGATE LIBERADO');
+    } else if (this.cashoutUnlocked) {
+      this.gameState = GAME_STATE.CASHOUT_AVAILABLE;
+    } else {
+      this.gameState = GAME_STATE.PLAYING;
+    }
+
+    if (clearCount > 0 && !this.resultShown) {
+      const label = clearCount >= 2 ? `${clearCount} LINHAS!` : 'BOA!';
+      this._showToast(label);
+    }
+
+    if (this.availablePieces.every((piece) => piece.used)) {
+      if (!this._generateBatch()) {
+        this._gameOver();
+        return;
+      }
+    } else if (!hasAnyMove(this.board, this.availablePieces)) {
+      this._gameOver();
+      return;
+    }
+
+    this._updateHud();
+    this._drawCashoutButton();
+  }
+
+  _animateClear(rows, columns, onComplete) {
+    const cells = uniqueCells(rows, columns, BLOCK_GAME_CONFIG.boardSize);
+    if (!cells.length) {
+      onComplete();
+      return;
+    }
+
+    let remaining = cells.length;
+    cells.forEach(([row, col], index) => {
+      const { cx, cy } = this._cellRect(row, col);
+      const flash = this.add.rectangle(cx, cy, this.cellSize, this.cellSize, THEME.gold, 0.74)
+        .setDepth(19);
+      this.clearLayer.add(flash);
+      this.tweens.add({
+        targets: flash,
+        scale: 1.22,
+        alpha: 0,
+        delay: index * 8,
+        duration: BLOCK_GAME_CONFIG.clearAnimationMs,
+        ease: 'Cubic.easeOut',
+        onComplete: () => {
+          flash.destroy();
+          remaining -= 1;
+          if (remaining === 0) onComplete();
+        },
       });
     });
-
-    this.sounds = new SoundManager();
-    this.particles = new ParticleEffects(this);
-
-    this._bgGfx = this.add.graphics();
-    this._floorGfx = this.add.graphics();
-    this._drawBg(0);
-
-    this.merm = new Mermaid(this);
-
-    this.hud = new HUD(this, this.bet);
-    this.hud.onCashOut(() => {
-      if (!this.dead && !this.cashed) this._cashOut();
-    });
-
-    this.input.on('pointerdown', (p) => {
-      if (this.roundReady && !this.dead && !this.cashed && p.y < H - 90) {
-        this.merm.flap();
-        this.sounds.playSwim();
-      }
-    });
-    this._space = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
-
-    this._showStatus('CONECTANDO...');
-    this._connectWS();
-    this._startTimeout = this.time.delayedCall(9000, () => {
-      if (!this.roundId && !this.resultShown) {
-        this._handleServerError('Conexao com o jogo demorou demais. Tente novamente.');
-      }
-    });
-
-    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this._cleanup());
   }
 
-  _showStatus(message) {
-    if (this._statusText) {
-      this._statusText.setText(message);
+  _drawBlocks() {
+    this.blockGfx.clear();
+    for (let row = 0; row < BLOCK_GAME_CONFIG.boardSize; row += 1) {
+      for (let col = 0; col < BLOCK_GAME_CONFIG.boardSize; col += 1) {
+        if (!this.board[row][col]) continue;
+        const { x, y } = this._cellRect(row, col);
+        const color = (row + col) % 3 === 0 ? THEME.gold : ((row + col) % 3 === 1 ? THEME.aqua : THEME.cyan);
+        this.blockGfx.fillStyle(0x000000, 0.22);
+        this.blockGfx.fillRoundedRect(x + 2, y + 3, this.cellSize, this.cellSize, 6);
+        this.blockGfx.fillStyle(color, 1);
+        this.blockGfx.fillRoundedRect(x, y, this.cellSize, this.cellSize, 6);
+        this.blockGfx.fillStyle(0xffffff, 0.16);
+        this.blockGfx.fillRoundedRect(x + 4, y + 4, this.cellSize - 8, Math.max(5, this.cellSize * 0.25), 4);
+        this.blockGfx.lineStyle(1, 0xffffff, 0.22);
+        this.blockGfx.strokeRoundedRect(x, y, this.cellSize, this.cellSize, 6);
+      }
+    }
+  }
+
+  _cellRect(row, col) {
+    const x = this.boardX + this.cellGap + col * this.cellStep;
+    const y = this.boardY + this.cellGap + row * this.cellStep;
+    return {
+      x,
+      y,
+      cx: x + this.cellSize / 2,
+      cy: y + this.cellSize / 2,
+    };
+  }
+
+  _currentMultiplier() {
+    const value = BLOCK_GAME_CONFIG.baseValueMultiplier
+      + this.totalClears * BLOCK_GAME_CONFIG.clearValueStep
+      + this.moves * BLOCK_GAME_CONFIG.moveValueStep;
+    return Math.min(BLOCK_GAME_CONFIG.maxDemoMultiplier, Number(value.toFixed(2)));
+  }
+
+  _currentValue() {
+    return Number((this.bet * this._currentMultiplier()).toFixed(2));
+  }
+
+  _updateHud() {
+    if (!this.valueText || !this.progressText) return;
+    const progress = Math.min(this.totalClears, BLOCK_GAME_CONFIG.clearsToUnlockCashout);
+    this.valueText.setText(money(this._currentValue()));
+    this.progressText.setText(`RESGATE ${progress}/${BLOCK_GAME_CONFIG.clearsToUnlockCashout}  |  TIER ${this.difficultyTier}  |  ${this.moves} JOGADAS`);
+  }
+
+  _drawCashoutButton() {
+    if (!this.cashoutGfx) return;
+    const unlocked = this.cashoutUnlocked;
+    const pending = this.gameState === GAME_STATE.CASHOUT_PENDING;
+    const done = this.resultShown || this.gameState === GAME_STATE.GAME_OVER;
+    const x = 20;
+    const y = this.cashoutY - 29;
+    const width = W - 40;
+    const height = 58;
+
+    this.cashoutGfx.clear();
+    if (unlocked && !pending && !done) {
+      this.cashoutGfx.fillGradientStyle(0xffdf72, 0xffdf72, 0x25e0a7, 0x25e0a7, 1);
+      this.cashoutGfx.fillRoundedRect(x, y, width, height, 10);
+      this.cashoutGfx.lineStyle(2, 0xffffff, 0.36);
+      this.cashoutGfx.strokeRoundedRect(x, y, width, height, 10);
+      this.cashoutLabel.setText(`RESGATAR ${money(this._currentValue())}`);
+      this.cashoutLabel.setColor('#210007');
+      this.cashoutSub.setText('modo demo');
       return;
     }
-    this._statusText = this.add.text(W / 2, H / 2, message, {
-      fontSize: '18px',
-      fontFamily: '"Arial Black", Arial, sans-serif',
-      color: '#ffe08a',
-      stroke: '#19070c',
-      strokeThickness: 4,
-    }).setOrigin(0.5).setDepth(50);
-  }
 
-  _clearStatus() {
-    if (this._statusText) {
-      this._statusText.destroy();
-      this._statusText = null;
+    this.cashoutGfx.fillGradientStyle(0x3f1420, 0x3f1420, 0x140811, 0x140811, 1);
+    this.cashoutGfx.fillRoundedRect(x, y, width, height, 10);
+    this.cashoutGfx.lineStyle(1, 0xffdf72, 0.24);
+    this.cashoutGfx.strokeRoundedRect(x, y, width, height, 10);
+
+    if (pending) {
+      this.cashoutLabel.setText('CONFIRMANDO...');
+      this.cashoutSub.setText('resgate demo em andamento');
+    } else if (done) {
+      this.cashoutLabel.setText('RODADA FINALIZADA');
+      this.cashoutSub.setText('veja o resultado');
+    } else {
+      const remaining = Math.max(0, BLOCK_GAME_CONFIG.clearsToUnlockCashout - this.totalClears);
+      this.cashoutLabel.setText(`RESGATE LIBERA EM ${remaining}`);
+      this.cashoutSub.setText('complete linhas ou colunas');
     }
-  }
-
-  _beginGameplay() {
-    if (this.gameplayStarted) return;
-    this.gameplayStarted = true;
-    this.roundReady = true;
-    this._clearStatus();
-
-    this._tObs  = this.time.addEvent({ delay: OBS_DELAY_START, callback: this._spawnObs,  callbackScope: this, loop: true });
-    this._tGem  = this.time.addEvent({ delay: GEM_DELAY,      callback: this._spawnGem,  callbackScope: this, loop: true });
-    this._tBub  = this.time.addEvent({ delay: 260, callback: this._spawnBub,  callbackScope: this, loop: true });
-    this._tMult = this.time.addEvent({ delay: 100, callback: this._tickMult,  callbackScope: this, loop: true });
-
-    this.merm.flap();
-  }
-  
-  _connectWS() {
-    try {
-      this.ws = new WebSocket(WS_URL);
-      this.ws.onopen = () => {
-        const token = getAuthToken();
-        if (!token) {
-          this._handleServerError('Sessao invalida');
-          return;
-        }
-        this._showStatus('RESERVANDO APOSTA...');
-        this.ws.send(JSON.stringify({ action: 'start_round', bet: this.bet, token }));
-      };
-      this.ws.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        if (data.type === 'round_started') {
-          this.roundId = data.round_id;
-          this.betDebitedByServer = !!data.bet_reserved;
-          this.demoMode = !!data.demo_mode;
-          if (Number.isFinite(data.balance)) state.balance = data.balance;
-          if (this._startTimeout) {
-            this._startTimeout.destroy();
-            this._startTimeout = null;
-          }
-          this._requestPlayStart();
-        } else if (data.type === 'play_started') {
-          if (data.round_id && data.round_id !== this.roundId) {
-            this._handleServerError('Rodada invalida recebida do servidor');
-            return;
-          }
-          this.betDebitedByServer = true;
-          if (Number.isFinite(data.balance)) state.balance = data.balance;
-          this._beginGameplay();
-        } else if (data.type === 'round_canceled') {
-          this._handleServerError(data.message || 'Rodada cancelada antes de iniciar');
-        } else if (data.type === 'cash_out_result') {
-          if (data.success) {
-            this._applyCashOutResult(data.payout, data.multiplier, data.balance);
-          } else {
-            this._showCrashLoss(data.multiplier);
-          }
-        } else if (data.type === 'round_crashed') {
-          this._serverCrash(data.multiplier);
-        } else if (data.type === 'death_registered') {
-          console.log('Crash point was: ' + data.crash_point + 'x');
-          this._applyLossResult(this.mult, this.lossReason);
-        } else if (data.type === 'error') {
-          this._handleServerError(data.message);
-        }
-      };
-      this.ws.onerror = () => {
-        if (!this.resultShown && !this.roundId) {
-          this._handleServerError('Falha na conexao WebSocket do jogo');
-        }
-      };
-      this.ws.onclose = () => {
-        if (this.resultShown) return;
-        if (!this.roundId) {
-          this._handleServerError('Conexao com o jogo fechada antes de iniciar');
-        } else if (!this.gameplayStarted) {
-          this._handleServerError('Conexao fechada antes do mergulho iniciar');
-        } else if (!this.dead && !this.cashed) {
-          this._applyLossResult(this.mult, 'connection');
-        }
-      };
-    } catch (e) {
-      this._handleServerError('Nao foi possivel abrir o WebSocket do jogo');
-    }
-  }
-
-  _requestPlayStart() {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN || !this.roundId) {
-      this._handleServerError('Rodada sem confirmacao do servidor');
-      return;
-    }
-    this._showStatus('INICIANDO MERGULHO...');
-    this.ws.send(JSON.stringify({ action: 'begin_play', round_id: this.roundId }));
-  }
-
-  _drawBg(depth) {
-    this._bgGfx.clear();
-    this._floorGfx.clear();
-    const t = Math.min(depth / 6, 1);
-
-    const topHex = Phaser.Display.Color.Interpolate.ColorWithColor(
-      { r: 0, g: 20, b: 80 }, { r: 0, g: 2, b: 10 }, 100, t * 100);
-    const botHex = Phaser.Display.Color.Interpolate.ColorWithColor(
-      { r: 0, g: 8, b: 32 }, { r: 0, g: 0, b: 5 }, 100, t * 100);
-
-    const tc = Phaser.Display.Color.GetColor(topHex.r, topHex.g, topHex.b);
-    const bc = Phaser.Display.Color.GetColor(botHex.r, botHex.g, botHex.b);
-
-    this._bgGfx.fillGradientStyle(tc, tc, bc, bc, 1);
-    this._bgGfx.fillRect(0, 0, W, H);
-
-    if (t < 0.75) {
-      const alpha = (0.75 - t) * 0.07;
-      for (let i = 0; i < 4; i++) {
-        this._bgGfx.fillStyle(0x2255ff, alpha);
-        const rx = 50 + i * 85;
-        const swing = Math.sin(this.time.now / 1600 + i) * 25;
-        this._bgGfx.fillTriangle(rx - 18, 0, rx + 18, 0, rx + swing, H * 0.65);
-      }
-    }
-
-    if (t > 0.4) {
-      for (let i = 0; i < 6; i++) {
-        const bx = (i * 67 + Math.sin(this.time.now / 900 + i) * 15) % W;
-        const by = H * 0.7 + (i * 23) % (H * 0.28);
-        this._bgGfx.fillStyle(0x00ffaa, (t - 0.4) * 0.07);
-        this._bgGfx.fillCircle(bx, by, 3);
-      }
-    }
-
-    this._floorGfx.fillStyle(0x00040b, 0.52);
-    this._floorGfx.fillRect(0, H - 104, W, 104);
-    this._floorGfx.lineStyle(1, 0x35e7cf, 0.12);
-    this._floorGfx.lineBetween(0, H - 104, W, H - 104);
-  }
-
-  _spawnObs() {
-    if (this.dead || this.cashed) return;
-    const gapY  = Phaser.Math.Between(206, H - 206);
-    this._obs.push(new Obstacle(this, gapY));
-  }
-
-  _spawnGem() {
-    if (this.dead || this.cashed) return;
-    this._gems.push(new Gem(this));
-  }
-
-  _spawnBub() {
-    const b = this.add.circle(
-      Phaser.Math.Between(0, W), H + 8,
-      Phaser.Math.Between(2, 8), 0x66aaff, 0.2
-    );
-    this._bubs.push({ obj: b, vy: Phaser.Math.Between(35, 90) });
-  }
-
-  _tickMult() {
-    if (!this.dead && !this.cashed) {
-      this.mult = +(this.mult + MULT_TICK).toFixed(3);
-    }
+    this.cashoutLabel.setColor('#fff7dc');
   }
 
   _cashOut() {
-    if (this.mult < CASHOUT_UNLOCK_MULT) return;
-
-    this.cashed = true;
-    this._stopTimers();
-    this.sounds.playCashout();
-    this.particles.emitCashoutShower();
-
-    if (this.ws && this.ws.readyState === WebSocket.OPEN && this.roundId) {
-      this.ws.send(JSON.stringify({ action: 'cash_out', round_id: this.roundId, client_mult: this.mult }));
-    } else {
-      this._handleServerError('Rodada sem confirmacao do servidor');
-    }
-  }
-
-  _die(reason = 'obstacle') {
-    if (this.dead || this.cashed) return;
-    this.lossReason = reason;
-    this.dead = true;
-    this.sounds.playCrash();
-    this.cameras.main.shake(280, 0.012);
-    this._stopTimers();
-
-    if (this.ws && this.ws.readyState === WebSocket.OPEN && this.roundId) {
-      this.ws.send(JSON.stringify({ action: 'death', round_id: this.roundId, client_mult: this.mult }));
-      this.time.delayedCall(900, () => {
-        if (!this.resultShown) this._applyLossResult(this.mult, this.lossReason);
-      });
-    } else {
-      this._applyLossResult(this.mult, this.lossReason);
-    }
-  }
-
-  _serverCrash(multiplier) {
-    if (this.dead || this.cashed) return;
-    this._showCrashLoss(multiplier);
-  }
-
-  _showCrashLoss(multiplier) {
-    if (this.resultShown) return;
-    if (Number.isFinite(multiplier)) {
-      this.mult = multiplier;
-    }
-    this.dead = true;
-    this.roundReady = false;
-    this.sounds.playCrash();
-    this.cameras.main.flash(150, 255, 80, 110);
-    this.cameras.main.shake(280, 0.012);
-    this._stopTimers();
-    this._showCrashWave();
-    this.time.delayedCall(420, () => this._applyLossResult(this.mult, 'crash'));
-  }
-
-  _showCrashWave() {
-    const wave = this.add.graphics().setDepth(45);
-    wave.fillStyle(0xff6675, 0.26);
-    wave.fillRect(0, 0, 92, H);
-    wave.fillStyle(0x7dd3fc, 0.18);
-    wave.fillRect(92, 0, 44, H);
-    wave.lineStyle(3, 0xffdf72, 0.55);
-    wave.lineBetween(0, 0, 0, H);
-    wave.x = W + 70;
-
-    const label = this.add.text(W / 2, H / 2 - 78, 'MARE VIROU!', {
-      fontSize: '20px',
-      fontFamily: '"Arial Black", Arial, sans-serif',
-      color: '#ffdf72',
-      stroke: '#27070b',
-      strokeThickness: 5,
-    }).setOrigin(0.5).setDepth(46);
-
-    this.tweens.add({
-      targets: wave,
-      x: -160,
-      duration: 420,
-      ease: 'Cubic.easeOut',
-      onComplete: () => wave.destroy(),
-    });
-    this.tweens.add({
-      targets: label,
-      alpha: 0,
-      y: label.y - 22,
-      delay: 220,
-      duration: 280,
-      onComplete: () => label.destroy(),
-    });
-  }
-
-  _handleServerError(message) {
-    console.warn('Game server error:', message);
-    if ((!this.roundId || !this.gameplayStarted) && !this.resultShown) {
-      this.dead = true;
-      this.cashed = true;
-      this._stopTimers();
-      if (message && message.toLowerCase().includes('sessao')) {
-        clearSession();
-        this.scene.start('Auth');
-      } else {
-        this._showStartFailure(message || 'Nao foi possivel iniciar a rodada. Tente novamente.');
-      }
+    if (this.resultShown || this.gameState === GAME_STATE.CASHOUT_PENDING) return;
+    if (!this.cashoutUnlocked) {
+      this.sounds.playInvalidPlace();
+      this._haptic(12);
+      this._showToast('COMPLETE 3 LINHAS OU COLUNAS');
       return;
     }
 
-    if ((this.dead || this.cashed) && !this.resultShown) {
-      this._applyLossResult(this.mult, 'connection');
-    }
+    this._clearDrag();
+    this.gameState = GAME_STATE.CASHOUT_PENDING;
+    this._drawCashoutButton();
+    this.sounds.playCashout();
+    this._haptic([18, 30, 18]);
+    this.time.delayedCall(420, () => {
+      this.gameState = GAME_STATE.CASHED_OUT;
+      this._showResult(true);
+    });
   }
 
-  _showStartFailure(message) {
-    if (this.startFailureShown) return;
-    this.startFailureShown = true;
+  _gameOver() {
+    if (this.resultShown) return;
+    this._clearDrag();
+    this.gameState = GAME_STATE.GAME_OVER;
+    this.sounds.playGameOver();
+    this._haptic([28, 44, 28]);
+    this.cameras.main.shake(180, 0.006);
+    this._drawCashoutButton();
+    this._showResult(false);
+  }
+
+  _showResult(won) {
+    if (this.resultShown) return;
     this.resultShown = true;
-    this._clearStatus();
+    this._clearDrag();
+    this._drawCashoutButton();
 
-    this.add.rectangle(0, 0, W, H, 0x000000, 0.56).setOrigin(0).setDepth(80);
-    const panel = this.add.graphics().setDepth(81);
-    const px = 28;
-    const py = H / 2 - 108;
-    const pw = W - 56;
-    const ph = 216;
-    panel.fillStyle(0x19070c, 0.97);
-    panel.fillRoundedRect(px, py, pw, ph, 8);
-    panel.lineStyle(2, 0xff9da5, 0.62);
-    panel.strokeRoundedRect(px, py, pw, ph, 8);
+    const overlay = this.add.container(0, 0).setDepth(80);
+    const dim = this.add.rectangle(0, 0, W, H, 0x000000, 0.72).setOrigin(0).setInteractive();
+    const px = 24;
+    const py = Math.max(118, H / 2 - 176);
+    const pw = W - 48;
+    const ph = 352;
+    const panel = this.add.graphics();
+    panel.fillGradientStyle(0x190d16, 0x190d16, 0x080711, 0x080711, 1);
+    panel.fillRoundedRect(px, py, pw, ph, 12);
+    panel.lineStyle(2, won ? THEME.gold : THEME.redSoft, 0.62);
+    panel.strokeRoundedRect(px, py, pw, ph, 12);
 
-    this.add.text(W / 2, py + 44, 'CONEXAO DO JOGO', {
-      fontSize: '18px',
+    const title = this.add.text(W / 2, py + 42, won ? 'RESGATE CONCLUIDO' : 'FIM DA RODADA', {
+      fontSize: '20px',
       fontFamily: '"Arial Black", Arial, sans-serif',
-      color: '#ffe08a',
-    }).setOrigin(0.5).setDepth(82);
-    this.add.text(W / 2, py + 96, message, {
-      fontSize: '13px',
-      fontFamily: 'Arial, sans-serif',
-      color: '#ffc0c7',
+      color: won ? '#ffdf72' : '#ff9aa9',
+      stroke: '#210007',
+      strokeThickness: 5,
+    }).setOrigin(0.5);
+
+    const value = this.add.text(W / 2, py + 92, won ? money(this._currentValue()) : 'R$ 0.00', {
+      fontSize: '34px',
+      fontFamily: '"Arial Black", Arial, sans-serif',
+      color: won ? '#8fffe7' : '#fff7dc',
+      stroke: '#04281d',
+      strokeThickness: won ? 5 : 0,
+    }).setOrigin(0.5);
+
+    const details = this.add.text(W / 2, py + 154, [
+      `Linhas/colunas: ${this.totalClears}`,
+      `Melhor combo: ${this.bestCombo}`,
+      `Jogadas: ${this.moves}`,
+      `Tier: ${this.difficultyTier}`,
+    ].join('\n'), {
+      fontSize: '14px',
+      fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#fff7dc',
       align: 'center',
-      wordWrap: { width: pw - 38 },
-      lineSpacing: 5,
-    }).setOrigin(0.5).setDepth(82);
-    this.add.text(W / 2, py + 170, 'TOQUE PARA VOLTAR', {
+      lineSpacing: 7,
+    }).setOrigin(0.5);
+
+    const note = this.add.text(W / 2, py + 218, 'Modo demo: nenhum saldo real foi debitado ou creditado.', {
       fontSize: '12px',
+      fontFamily: 'Arial, sans-serif',
+      color: '#dca197',
+      align: 'center',
+      wordWrap: { width: pw - 42 },
+      lineSpacing: 4,
+    }).setOrigin(0.5);
+
+    const replay = this._makePanelButton(W / 2, py + 274, pw - 50, 46, 'JOGAR NOVAMENTE', true, () => {
+      this.scene.restart({ bet: this.bet });
+    });
+    const lobby = this._makePanelButton(W / 2, py + 326, pw - 50, 40, 'VOLTAR AO LOBBY', false, () => {
+      this.scene.start('Lobby', { balance: state.balance });
+    });
+
+    overlay.add([dim, panel, title, value, details, note, replay, lobby]);
+  }
+
+  _makePanelButton(x, y, width, height, text, primary, handler) {
+    const container = this.add.container(x, y);
+    const bg = this.add.graphics();
+    bg.fillGradientStyle(
+      primary ? 0xffdf72 : 0x17233a,
+      primary ? 0xffdf72 : 0x17233a,
+      primary ? 0xd59d19 : 0x090710,
+      primary ? 0xd59d19 : 0x090710,
+      1
+    );
+    bg.fillRoundedRect(-width / 2, -height / 2, width, height, 8);
+    bg.lineStyle(1, primary ? 0xffffff : 0x7dd3fc, primary ? 0.42 : 0.26);
+    bg.strokeRoundedRect(-width / 2, -height / 2, width, height, 8);
+    const label = this.add.text(0, 0, text, {
+      fontSize: primary ? '15px' : '12px',
       fontFamily: '"Arial Black", Arial, sans-serif',
-      color: '#8eb8c7',
-    }).setOrigin(0.5).setDepth(82);
+      color: primary ? '#210007' : '#d7fbff',
+    }).setOrigin(0.5);
+    const zone = this.add.zone(0, 0, width, height).setInteractive({ useHandCursor: true });
+    zone.on('pointerdown', handler);
+    container.add([bg, label, zone]);
+    return container;
+  }
 
-    this.input.once('pointerdown', () => {
-      this.scene.start('Lobby', { balance: state.balance, notice: message });
+  _showTutorial() {
+    const overlay = this.add.container(0, 0).setDepth(90);
+    const dim = this.add.rectangle(0, 0, W, H, 0x000000, 0.76).setOrigin(0).setInteractive();
+    const px = 24;
+    const py = Math.max(104, H / 2 - 192);
+    const pw = W - 48;
+    const ph = 384;
+    const panel = this.add.graphics();
+    panel.fillGradientStyle(0x190d16, 0x190d16, 0x080711, 0x080711, 1);
+    panel.fillRoundedRect(px, py, pw, ph, 12);
+    panel.lineStyle(2, THEME.gold, 0.58);
+    panel.strokeRoundedRect(px, py, pw, ph, 12);
+
+    const title = this.add.text(W / 2, py + 42, 'BLOCK GAME', {
+      fontSize: '22px',
+      fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#ffdf72',
+      stroke: '#4a0612',
+      strokeThickness: 5,
+    }).setOrigin(0.5);
+
+    const body = this.add.text(W / 2, py + 142, [
+      'Arraste as pecas para o tabuleiro.',
+      'Complete linhas ou colunas para limpar.',
+      'Com 3 limpezas, o resgate demo libera.',
+      'Se nenhuma peca couber, a rodada termina.',
+    ].join('\n'), {
+      fontSize: '14px',
+      fontFamily: 'Arial, sans-serif',
+      color: '#fff7dc',
+      align: 'center',
+      lineSpacing: 10,
+      wordWrap: { width: pw - 42 },
+    }).setOrigin(0.5);
+
+    const button = this._makePanelButton(W / 2, py + 320, pw - 70, 48, 'ENTENDI', true, () => {
+      try {
+        window.localStorage.setItem(TUTORIAL_KEY, 'true');
+      } catch {}
+      overlay.destroy(true);
+    });
+
+    overlay.add([dim, panel, title, body, button]);
+  }
+
+  _tutorialSeen() {
+    try {
+      return window.localStorage.getItem(TUTORIAL_KEY) === 'true';
+    } catch {
+      return false;
+    }
+  }
+
+  _showToast(message) {
+    if (this.toast) this.toast.destroy();
+    const y = Math.max(118, this.boardY - 28);
+    this.toast = this.add.text(W / 2, y, message, {
+      fontSize: '13px',
+      fontFamily: '"Arial Black", Arial, sans-serif',
+      color: '#210007',
+      backgroundColor: '#ffdf72',
+      padding: { x: 12, y: 8 },
+    }).setOrigin(0.5).setDepth(70);
+    this.tweens.add({
+      targets: this.toast,
+      y: y - 16,
+      alpha: 0,
+      delay: 760,
+      duration: 260,
+      ease: 'Sine.easeOut',
+      onComplete: () => {
+        if (this.toast) this.toast.destroy();
+        this.toast = null;
+      },
     });
   }
 
-  _applyCashOutResult(payout, multiplier = this.mult, balance = null) {
-    if (this.resultShown) return;
-    if (Number.isFinite(multiplier)) this.mult = multiplier;
-    const amount = Number.isFinite(payout) ? payout : +(this.bet * this.mult).toFixed(2);
-    if (Number.isFinite(balance)) {
-      state.balance = balance;
-    } else if (this.betDebitedByServer) {
-      state.balance += amount;
-    } else {
-      state.balance += (amount - this.bet);
-    }
-    addHistory(this.mult);
-    this._showResult(true, amount, 'cashout');
+  _canPlayInput() {
+    return this.gameState === GAME_STATE.PLAYING || this.gameState === GAME_STATE.CASHOUT_AVAILABLE;
   }
 
-  _applyLossResult(multiplier = this.mult, reason = 'crash') {
-    if (this.resultShown) return;
-    if (Number.isFinite(multiplier)) this.mult = multiplier;
-    if (!this.betDebitedByServer) {
-      state.balance = Math.max(0, state.balance - this.bet);
+  _clearDrag() {
+    this.ghostGfx?.clear();
+    if (this.drag?.view?.container) {
+      this.drag.view.container.setScale(1);
+      this.drag.view.container.setDepth(22);
     }
-    addHistory(this.mult);
-    this._showResult(false, 0, reason);
+    this.drag = null;
   }
 
-  _stopTimers() {
-    [this._tObs, this._tGem, this._tBub, this._tMult, this._startTimeout].forEach((timer) => {
-      if (timer) timer.destroy();
-    });
-    this._tObs = null;
-    this._tGem = null;
-    this._tBub = null;
-    this._tMult = null;
-    this._startTimeout = null;
+  _haptic(pattern) {
+    if (typeof navigator !== 'undefined' && navigator.vibrate) {
+      navigator.vibrate(pattern);
+    }
   }
 
   _cleanup() {
-    this._stopTimers();
-    if (this.ws) {
-      this.ws.onopen = null;
-      this.ws.onmessage = null;
-      this.ws.onerror = null;
-      this.ws.onclose = null;
-      if (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING) {
-        this.ws.close();
-      }
-      this.ws = null;
-    }
-  }
-
-  _showResult(won, amount, reason = 'crash') {
-    if (this.resultShown) return;
-    this.resultShown = true;
-    this.hud.showResult(won, amount, this.mult, this.bet, reason);
-    this.time.delayedCall(1800, () => {
-      this.input.once('pointerdown', () => this.scene.start('Lobby', { balance: state.balance }));
+    this._clearDrag();
+    this.pieceViews.forEach((view) => {
+      if (view?.container) view.container.destroy(true);
     });
-  }
-
-  update(time, delta) {
-    if (this.dead || this.cashed || !this.roundReady) return;
-    const dt = delta / 1000;
-
-    this.speed = this.demoMode ? this.baseSpeed : this.baseSpeed + (this.mult - 1) * 58;
-
-    this._drawBg(-this.mult - 1);
-
-    if (this.roundReady && Phaser.Input.Keyboard.JustDown(this._space)) {
-      this.merm.flap();
-      this.sounds.playSwim();
-    }
-    this.merm.update(dt);
-    this.particles.emitBubbleTrail(this.merm.x, this.merm.y);
-
-    if (this.merm.isOutOfBounds()) { this._die('boundary'); return; }
-
-    for (let i = this._obs.length - 1; i >= 0; i--) {
-      const o = this._obs[i];
-      o.update(this.speed, dt);
-
-      if (o.checkCollision(this.merm.x, this.merm.y, this.merm.hitRadius)) {
-        this._die('obstacle'); return;
-      }
-
-      if (o.isOffScreen()) {
-        o.destroy();
-        this._obs.splice(i, 1);
-      }
-    }
-
-    for (let i = this._gems.length - 1; i >= 0; i--) {
-      const g = this._gems[i];
-      g.update(this.speed, dt);
-
-      if (g.checkCollect(this.merm.x, this.merm.y)) {
-        this.mult = +(this.mult + GEM_BONUS).toFixed(3);
-        this.sounds.playGem();
-        this.cameras.main.flash(70, 30, 160, 80);
-        this.particles.emitGemBurst(g.sprite.x, g.sprite.y);
-        this._showBonus(g.sprite.x, g.sprite.y);
-        g.destroy(); 
-        this._gems.splice(i, 1);
-        continue;
-      }
-      if (g.isOffScreen()) {
-        g.destroy(); 
-        this._gems.splice(i, 1); 
-      }
-    }
-
-    for (let i = this._bubs.length - 1; i >= 0; i--) {
-      const b = this._bubs[i];
-      b.obj.y -= b.vy * dt;
-      if (b.obj.y < -12) { b.obj.destroy(); this._bubs.splice(i, 1); }
-    }
-
-    this.hud.updateMult(this.mult, this.bet);
-
-    if (!this.demoMode && this.mult > 2.5 && this._tObs.delay > 1400) this._tObs.delay = 1400;
-    if (!this.demoMode && this.mult > 4.0 && this._tObs.delay > 1100) this._tObs.delay = 1100;
-  }
-
-  _showBonus(x, y) {
-    const txt = this.add.text(x, y - 24, '+0.07x', {
-      fontSize: '16px',
-      fontFamily: '"Arial Black", Arial, sans-serif',
-      color: '#ffe08a',
-      stroke: '#2f2100',
-      strokeThickness: 3
-    }).setOrigin(0.5);
-
-    this.tweens.add({ targets: txt, y: y - 58, alpha: 0, duration: 620, ease: 'Sine.easeOut', onComplete: () => txt.destroy() });
+    this.pieceViews = [];
   }
 }

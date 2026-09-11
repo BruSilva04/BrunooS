@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { W, H, BETS, MERMAID_GAME_CONFIG, centsToMoney, moneyToCents, state } from '../config.js';
+import { W, H, BETS, BLOCK_GAME_CONFIG, centsToMoney, moneyToCents, state } from '../config.js';
 
 export default class MenuScene extends Phaser.Scene {
   constructor() {
@@ -107,7 +107,7 @@ export default class MenuScene extends Phaser.Scene {
       strokeThickness: 4
     }).setOrigin(0.5);
 
-    this.add.text(W / 2, 226, 'Resgate antes da maré virar', {
+    this.add.text(W / 2, 226, 'Puzzle de blocos em modo demo', {
       fontSize: '13px',
       fontFamily: 'Arial, sans-serif',
       color: '#a7eaff'
@@ -160,13 +160,13 @@ export default class MenuScene extends Phaser.Scene {
       color: '#ffffff'
     });
 
-    this.add.text(px + pw - 18, py + 22, '95% RTP', {
+    this.add.text(px + pw - 18, py + 22, 'DEMO', {
       fontSize: '12px',
       fontFamily: '"Arial Black", Arial, sans-serif',
       color: '#f8d66d'
     }).setOrigin(1, 0);
 
-    this.add.text(px + 18, py + 76, 'Aposta minima da Sereia: R$ ' + centsToMoney(MERMAID_GAME_CONFIG.minBetCents).toFixed(2), {
+    this.add.text(px + 18, py + 76, 'Aposta minima deste jogo: R$ ' + centsToMoney(BLOCK_GAME_CONFIG.minimumBetCents).toFixed(2), {
       fontSize: '10px',
       fontFamily: 'Arial, sans-serif',
       color: '#9bdff0'
@@ -213,7 +213,7 @@ export default class MenuScene extends Phaser.Scene {
 
   _drawPlayButton() {
     const y = 520;
-    const canPlay = moneyToCents(state.balance) >= MERMAID_GAME_CONFIG.minBetCents && state.balance >= this.bet;
+    const canPlay = moneyToCents(state.balance) >= BLOCK_GAME_CONFIG.minimumBetCents && state.balance >= this.bet;
     const shadow = this.add.graphics();
     shadow.fillStyle(0x000000, 0.35);
     shadow.fillRoundedRect(54, y + 9, W - 108, 58, 8);
@@ -230,7 +230,7 @@ export default class MenuScene extends Phaser.Scene {
     bg.lineStyle(2, 0xffffff, 0.35);
     bg.strokeRoundedRect(44, y, W - 88, 60, 8);
 
-    const label = this.add.text(W / 2, y + 30, canPlay ? 'JOGAR R$ ' + this.bet.toFixed(2) : 'SALDO INSUFICIENTE', {
+    const label = this.add.text(W / 2, y + 30, canPlay ? 'TESTAR R$ ' + this.bet.toFixed(2) : 'SALDO INSUFICIENTE', {
       fontSize: '20px',
       fontFamily: '"Arial Black", Arial, sans-serif',
       color: '#ffffff',
@@ -243,7 +243,7 @@ export default class MenuScene extends Phaser.Scene {
     hit.on('pointerout', () => label.setScale(1));
     hit.on('pointerdown', () => {
       if (this.launchLocked) return;
-      if (moneyToCents(state.balance) < MERMAID_GAME_CONFIG.minBetCents || state.balance < this.bet) {
+      if (moneyToCents(state.balance) < BLOCK_GAME_CONFIG.minimumBetCents || state.balance < this.bet) {
         this._showInsufficientBalance();
         return;
       }
@@ -297,7 +297,7 @@ export default class MenuScene extends Phaser.Scene {
 
   _showInsufficientBalance() {
     if (this.insufficientOverlay) return;
-    const minBet = centsToMoney(MERMAID_GAME_CONFIG.minBetCents);
+    const minBet = centsToMoney(BLOCK_GAME_CONFIG.minimumBetCents);
     const overlay = this.add.container(0, 0).setDepth(120);
     const dim = this.add.rectangle(0, 0, W, H, 0x000510, 0.72).setOrigin(0);
     const panel = this.add.graphics();

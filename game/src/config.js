@@ -27,6 +27,25 @@ export const MULT_TICK = 0.0085;
 export const GEM_BONUS = 0.07;
 export const CASHOUT_UNLOCK_MULT = 2.5;
 
+export const BLOCK_GAME_CONFIG = {
+  boardSize: 8,
+  piecesPerBatch: 3,
+  clearsToUnlockCashout: 3,
+  minimumBetCents: MERMAID_MIN_BET_CENTS,
+  baseValueMultiplier: 1,
+  clearValueStep: 0.32,
+  moveValueStep: 0.025,
+  maxDemoMultiplier: 8,
+  dragOffsetMin: 54,
+  dragOffsetMax: 76,
+  clearAnimationMs: 280,
+  difficulty: {
+    easyUntil: 3,
+    mediumUntil: 6,
+    hardUntil: 9,
+  },
+};
+
 export const ROUND_STATES = {
   IDLE: 'IDLE',
   BET_CONFIGURATION: 'BET_CONFIGURATION',
@@ -91,8 +110,11 @@ export function centsToMoney(cents) {
   return Number(cents || 0) / 100;
 }
 
-const runtimeHost = window.location.hostname || 'localhost';
-const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+const browserLocation = typeof window !== 'undefined' ? window.location : null;
+const runtimeHost = browserLocation?.hostname || 'localhost';
+const runtimeProtocol = browserLocation?.protocol || 'http:';
+const wsProtocol = runtimeProtocol === 'https:' ? 'wss' : 'ws';
+const viteEnv = import.meta.env || {};
 
 function normalizeEnvUrl(value, envName) {
   const rawValue = String(value || '').trim();
@@ -105,12 +127,12 @@ function normalizeEnvUrl(value, envName) {
 }
 
 export const API_URL = normalizeEnvUrl(
-  import.meta.env.VITE_API_URL,
+  viteEnv.VITE_API_URL,
   'VITE_API_URL'
-) || `${window.location.protocol}//${runtimeHost}:8000`;
+) || `${runtimeProtocol}//${runtimeHost}:8000`;
 
 export const WS_URL = normalizeEnvUrl(
-  import.meta.env.VITE_WS_URL,
+  viteEnv.VITE_WS_URL,
   'VITE_WS_URL'
 ) || `${wsProtocol}://${runtimeHost}:8000/ws/game`;
 
