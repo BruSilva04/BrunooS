@@ -33,6 +33,8 @@ O projeto ja esta funcional com:
 
 O produto ainda precisa de QA final em dispositivos reais, arte final proprietaria, fluxo completo de afiliados/influenciadores e revisao operacional antes de trafego pago.
 
+Nota de produto: em 2026-09-10, o runner novo em tres faixas foi pausado porque a sensacao visual/gameplay ainda nao ficou boa. A experiencia ativa voltou temporariamente para o jogo classico de toque/flap, obstaculos laterais, diamantes e cash out. Os arquivos do runner novo continuam no repositorio em `game/src/runner/*` para referencia futura, mas nao sao a experiencia principal enquanto uma nova direcao de jogo e definida.
+
 ---
 
 ## 2. Conceito do Produto
@@ -255,7 +257,7 @@ Fluxo:
 7. Cliente envia `begin_play`.
 8. Backend debita a aposta, muda a rodada para `active` e inicia o relogio do crash.
 9. Backend retorna `play_started`.
-10. Usuario joga em tres faixas, desvia de obstaculos, coleta tesouros visuais e decide cash out.
+10. Usuario joga tocando para nadar, passa por obstaculos laterais, coleta diamantes visuais e decide cash out.
 11. Cash out so e permitido a partir de 2.50x.
 12. Backend valida multiplicador server-side.
 13. Resultado volta para o cliente.
@@ -268,29 +270,27 @@ Fluxo:
 ### Core loop
 
 ```text
-Escolher aposta -> reservar rodada no backend -> countdown -> runner em tres faixas -> multiplicador sobe -> cash out ou derrota -> lobby
+Escolher aposta -> reservar rodada no backend -> iniciar mergulho -> toque/flap -> multiplicador sobe -> cash out ou derrota -> lobby
 ```
 
 ### Controle
 
-- Mobile: swipe left/right muda uma faixa.
-- Mobile: swipe up/down executa desvio vertical.
-- Desktop QA: setas e WASD.
-- Inputs ficam bloqueados durante countdown, cashout pendente e estados finais.
+Estado ativo temporario:
+
+- Mobile: toque na tela faz a sereia subir.
+- Desktop QA: barra de espaco faz a sereia subir.
+- A gravidade puxa a sereia para baixo.
+- Inputs ficam bloqueados antes de `play_started`, durante cashout pendente e estados finais.
 
 ### Obstaculos
 
-Obstaculos surgem ao fundo e se aproximam em perspectiva pseudo-3D.
+Estado ativo temporario:
 
-Estado atual:
-
-- 3 lanes logicas: esquerda `-1`, centro `0`, direita `1`.
-- Spawn director centraliza os padroes de obstaculos.
-- Padroes sempre deixam pelo menos uma rota/acao possivel.
-- Obstaculos soft aproximam o tubarao e geram hit stun.
-- Obstaculos hard encerram a rodada.
-- Obstaculos verticais podem exigir swipe up ou swipe down.
-- Colisao e resolvida somente quando o obstaculo cruza a zona da sereia, reduzindo falso positivo de parede invisivel.
+- Obstaculos entram pela direita e caminham para a esquerda.
+- Cada obstaculo cria uma abertura vertical segura.
+- Colisao acontece se a sereia encostar na zona superior ou inferior fora da abertura.
+- O jogo antigo e mais simples e deve ser usado enquanto a nova direcao de gameplay e definida.
+- O runner em tres faixas fica pausado/arquivado para futura revisao.
 
 ### Tesouros
 
@@ -306,13 +306,7 @@ Ao coletar:
 
 ### Tubarao perseguidor
 
-Existe `sharkDistance` no cliente para tensao visual:
-
-- Seguro: tubarao distante.
-- Warning: tubarao visivel e camera com leve pressao.
-- Danger: novo erro pode encerrar a rodada.
-
-O tubarao e uma camada de gameplay/UX. O crash point e o payout continuam no backend.
+O tubarao perseguidor existia no runner em tres faixas, mas esta pausado junto com esse modo. A experiencia ativa temporaria nao usa `sharkDistance`; derrota ocorre por crash server-side, colisao com obstaculo ou sair da area segura.
 
 ### Multiplicador
 
@@ -338,10 +332,9 @@ Tipos principais:
 
 - Crash server-side: a rodada quebrou antes do cash out. No HUD aparece `A MARE VIROU`.
 - Colisao hard com obstaculo.
-- Segunda colisao soft em estado critico do tubarao.
 - Conexao: WebSocket caiu no meio da rodada.
 
-Observacao importante para QA: se a derrota mostrar `A MARE VIROU`, nao foi parede invisivel; foi crash da rodada. Se mostrar colisao sem obstaculo visivel na lane da sereia, entao ainda existe problema de spawn/camera para revisar.
+Observacao importante para QA: se a derrota mostrar `A MARE VIROU`, nao foi parede invisivel; foi crash da rodada. Se mostrar colisao sem obstaculo visivel perto da sereia, entao ainda existe problema de hitbox/camera para revisar.
 
 ---
 
@@ -351,25 +344,16 @@ Observacao importante para QA: se a derrota mostrar `A MARE VIROU`, nao foi pare
 
 Para usuario comum, a dificuldade aumenta com o multiplicador:
 
-- Velocidade base visual: `MERMAID_GAME_CONFIG.baseTravelSpeed`.
-- Velocidade maxima visual: `MERMAID_GAME_CONFIG.maxTravelSpeed`.
-- Dificuldade considera profundidade e multiplicador.
-- Spawn de obstaculos vai de `spawnIntervalStartMs` ate `spawnIntervalMinMs`.
-- Profundidade altera bioma, intensidade visual e densidade.
-
-Regra atual no cliente:
+- Velocidade base visual no jogo classico: `baseSpeed = 170`.
+- A velocidade cresce com o multiplicador.
+- Obstaculos ficam mais frequentes em marcos de multiplicador.
+- A profundidade visual deriva do multiplicador.
 
 ```text
-difficulty = f(depth, multiplier)
-speed = linear(baseTravelSpeed, maxTravelSpeed, difficulty)
+speed = baseSpeed + (multiplier - 1) * 58
 ```
 
-Biomas atuais:
-
-- Recife: 0m+.
-- Naufragio: 100m+.
-- Ruinas: 300m+.
-- Abismo: 600m+.
+Os biomas do runner novo estao pausados junto com o modo de tres faixas.
 
 ### Admin/demo
 
@@ -377,7 +361,7 @@ Conta admin entra como modo demo.
 
 Para admin:
 
-- Velocidade permanece em `demoTravelSpeed`.
+- Velocidade permanece em `baseSpeed`.
 - Frequencia de obstaculo permanece estavel.
 - Objetivo e demonstracao/teste, nao jogo real.
 
@@ -1570,7 +1554,7 @@ Um cassino arcade de uma unica experiencia, com:
 - Saldo.
 - Bonus.
 - Rollover.
-- Jogo crash/runner.
+- Jogo crash/arcade.
 - Historico.
 - Perfil.
 - Saque Pix.
@@ -1725,7 +1709,7 @@ Use este bloco para abrir outra conversa sobre a agencia:
 ```text
 Estou criando uma agencia/plataforma para vender/licenciar um jogo de cassino mobile-first para influenciadores.
 
-O produto inicial se chama Sereia do Tesouro / Sereia Palace. E um jogo web de cassino arcade: three-lane runner subaquatico com sereia, tubarao perseguidor, obstaculos, tesouros visuais, profundidade, biomas, multiplicador crescente e cash out. O usuario acessa pelo celular, faz cadastro/login, deposita via Pix, escolhe aposta minima de R$ 30 no jogo da Sereia e joga. O deposito minimo da plataforma continua R$ 20. O cash out so libera a partir de 2.50x.
+O produto inicial se chama Sereia do Tesouro / Sereia Palace. No estado atual temporario, e um jogo web de cassino arcade com toque/flap, sereia, obstaculos laterais, diamantes visuais, multiplicador crescente e cash out. O usuario acessa pelo celular, faz cadastro/login, deposita via Pix, escolhe aposta minima de R$ 30 no jogo da Sereia e joga. O deposito minimo da plataforma continua R$ 20. O cash out so libera a partir de 2.50x. A direcao do gameplay ainda sera reavaliada antes da arte final.
 
 Stack atual:
 - Frontend/jogo: Phaser 3 + Vite.
@@ -1822,11 +1806,11 @@ Frontend:
 - `game/src/scenes/AuthScene.js`: login/cadastro.
 - `game/src/scenes/LobbyScene.js`: lobby, promocao, perfil, deposito e saque.
 - `game/src/scenes/MenuScene.js`: escolha de aposta.
-- `game/src/scenes/GameScene.js`: gameplay runner, estados e WebSocket.
-- `game/src/runner/ObstacleDirector.js`: dificuldade, biomas e padroes de obstaculos.
-- `game/src/runner/RunnerActors.js`: sereia, tubarao, obstaculos e tesouros vetoriais.
-- `game/src/runner/RunnerHUD.js`: multiplicador, profundidade, cash out e telas finais.
-- `game/src/objects/*`: objetos antigos do prototipo; manter enquanto nao houver limpeza planejada.
+- `game/src/scenes/GameScene.js`: gameplay classico temporario, estados e WebSocket.
+- `game/src/objects/*`: objetos ativos do jogo classico temporario.
+- `game/src/runner/ObstacleDirector.js`: runner pausado; manter como referencia enquanto a nova direcao e definida.
+- `game/src/runner/RunnerActors.js`: runner pausado; atores vetoriais nao usados no gameplay ativo.
+- `game/src/runner/RunnerHUD.js`: runner pausado; HUD nao usado no gameplay ativo.
 
 Backend:
 
