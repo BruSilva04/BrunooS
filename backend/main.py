@@ -30,7 +30,7 @@ async def lifespan(app: FastAPI):
     yield
 
 app = FastAPI(
-    title="Sereia do Tesouro - Backend",
+    title="Block Rush - Backend",
     version="0.1.0",
     lifespan=lifespan
 )
@@ -67,7 +67,7 @@ async def security_headers(request, call_next):
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "game": "Sereia do Tesouro"}
+    return {"status": "ok", "game": "Block Rush"}
 
 
 @app.get("/health/db")

@@ -17,7 +17,9 @@ function clamp(value, min, max) {
 
 export const H = getMobileHeight();
 export const PLATFORM_MIN_DEPOSIT_CENTS = 2000;
-export const MERMAID_MIN_BET_CENTS = 3000;
+export const BLOCK_MIN_BET_CENTS = 3000;
+// Retained for the archived runner implementation.
+export const MERMAID_MIN_BET_CENTS = BLOCK_MIN_BET_CENTS;
 export const BETS = [30, 50, 100, 200, 500];
 export const GRAVITY = 880;
 export const FLAP = -430;
@@ -31,7 +33,7 @@ export const BLOCK_GAME_CONFIG = {
   boardSize: 8,
   piecesPerBatch: 3,
   clearsToUnlockCashout: 3,
-  minimumBetCents: MERMAID_MIN_BET_CENTS,
+  minimumBetCents: BLOCK_MIN_BET_CENTS,
   baseValueMultiplier: 1,
   clearValueStep: 0.32,
   moveValueStep: 0.025,

@@ -77,7 +77,7 @@ async def create_pix_receive(
         "products": [
             {
                 "id": "sereia-credits",
-                "name": "Creditos Sereia Palace",
+                "name": "Creditos Block Rush",
                 "quantity": 1,
                 "price": round(float(amount), 2),
                 "physical": False,

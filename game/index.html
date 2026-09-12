@@ -3,17 +3,20 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <title>Sereia do Tesouro</title>
+  <title>Block Rush</title>
+  <meta name="description" content="Encaixe blocos, complete linhas e encontre sua próxima jogada no Block Rush. Experimente o puzzle em modo demo.">
+  <meta name="theme-color" content="#090b1a">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     html {
       width: 100%;
       min-height: 100%;
-      background: #000510;
+      background: #090b1a;
       overflow: hidden;
     }
     body {
-      background: #000510;
+      background: #090b1a;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -60,7 +63,7 @@
       document.documentElement.style.setProperty('--app-height', height + 'px');
       document.documentElement.style.setProperty('--app-width', width + 'px');
     }
-    window.sereiaSyncViewport = syncAppViewport;
+    window.syncAppViewport = syncAppViewport;
     syncAppViewport();
     window.addEventListener('resize', syncAppViewport, { passive: true });
     window.addEventListener('orientationchange', function () {

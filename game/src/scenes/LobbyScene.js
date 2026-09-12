@@ -1,5 +1,6 @@
 import Phaser from 'phaser';
 import { W, H, state } from '../config.js';
+import { BRAND } from '../brand.js';
 import {
   clearSession,
   confirmSandboxDeposit,
@@ -9,17 +10,10 @@ import {
   requestWithdrawal,
 } from '../services/api.js';
 
-const CLR = {
-  deep: 0x080711,
-  red: 0x9f1426,
-  redDark: 0x4a0612,
-  gold: 0xf4c84a,
-};
-
 const TABS = [
-  { key: 'lobby', label: 'Lobby' },
-  { key: 'promo', label: 'Promo&ccedil;&atilde;o' },
-  { key: 'profile', label: 'Perfil' },
+  { key: 'lobby', label: 'Lobby', icon: '▦' },
+  { key: 'promo', label: 'Carteira', icon: '▤' },
+  { key: 'profile', label: 'Perfil', icon: '○' },
 ];
 
 export default class LobbyScene extends Phaser.Scene {
@@ -31,7 +25,7 @@ export default class LobbyScene extends Phaser.Scene {
     this.fallbackBalance = data.balance;
     this.user = getStoredUser();
     this.snapshot = null;
-    this.currentTab = data.tab || 'lobby';
+    this.currentTab = TABS.some((tab) => tab.key === data.tab) ? data.tab : 'lobby';
     this.modal = null;
     this.notice = data.notice || '';
     this.walletMessage = '';
@@ -45,28 +39,50 @@ export default class LobbyScene extends Phaser.Scene {
     this._drawBackground();
     this._mountLobby();
     this._renderLoading();
-    this._floatGold();
     this._loadLobby();
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this._cleanup());
   }
 
   async _loadLobby() {
+    const mountedRoot = this.root;
     try {
-      this.snapshot = await fetchLobby();
+      const snapshot = await fetchLobby();
+      if (!mountedRoot || this.root !== mountedRoot) return;
+      this.snapshot = snapshot;
       this.user = this.snapshot.user;
       state.balance = Number(this.snapshot.balance || 0);
       state.history = (this.snapshot.history || []).map((round) => Number(round.mult || 1)).slice(0, 5);
       this.modal = null;
       this._render();
-    } catch {
-      clearSession();
-      this.scene.start('Auth');
+    } catch (error) {
+      if (!mountedRoot || this.root !== mountedRoot) return;
+      if (error.status === 401) {
+        clearSession();
+        this.scene.start('Auth');
+      } else if (this.snapshot) {
+        this.notice = error.message || 'Não foi possível atualizar a conta. Tente novamente.';
+        this._render();
+      } else {
+        this.root.innerHTML = `
+          ${this._style()}
+          <main class="lobby-shell loading-shell">
+            <section class="loading-card" role="alert">
+              ${this._brandMarkHtml()}
+              <strong>Não foi possível carregar</strong>
+              <span>${this._escape(error.message || 'Tente novamente em instantes.')}</span>
+              <button type="button" class="primary-btn" data-action="refresh">Tentar novamente</button>
+              <button type="button" class="dark-btn" data-action="logout">Voltar ao acesso</button>
+            </section>
+          </main>`;
+        this._bindDom();
+      }
     }
   }
 
   _mountLobby() {
     this.root = document.createElement('div');
-    this.root.className = 'sereia-lobby-root';
+    this.root.className = 'block-lobby-root';
+    this.root.addEventListener('keydown', (event) => this._onKeyDown(event));
     document.body.appendChild(this.root);
   }
 
@@ -75,10 +91,10 @@ export default class LobbyScene extends Phaser.Scene {
     this.root.innerHTML = `
       ${this._style()}
       <main class="lobby-shell loading-shell">
-        <section class="loading-card">
-          <div class="brand-orb">S</div>
-          <strong>Carregando lobby</strong>
-          <span>Preparando sua conta...</span>
+        <section class="loading-card" role="status">
+          ${this._brandMarkHtml()}
+          <strong>Carregando seu lobby</strong>
+          <span>Buscando os dados da sua conta…</span>
         </section>
       </main>
     `;
@@ -86,11 +102,17 @@ export default class LobbyScene extends Phaser.Scene {
 
   _render() {
     if (!this.root) return;
+    const previousModal = this.root.querySelector('.modal-card');
+    const formValues = previousModal && previousModal.dataset.modal === this.modal
+      ? [...previousModal.querySelectorAll('input, select')].map((input) => [input.name, input.value])
+      : [];
+    const focusedName = previousModal?.contains(document.activeElement) ? document.activeElement.name : '';
     this.root.innerHTML = `
       ${this._style()}
-      <main class="lobby-shell">
+      <main class="lobby-shell" ${this.modal ? 'inert' : ''}>
         ${this._topBarHtml()}
         <section class="lobby-content">
+          ${this.notice ? `<section class="lobby-notice" role="status">${this._escape(this.notice)}</section>` : ''}
           ${this.currentTab === 'promo' ? this._promoHtml() : ''}
           ${this.currentTab === 'profile' ? this._profileHtml() : ''}
           ${this.currentTab === 'lobby' ? this._lobbyHtml() : ''}
@@ -99,7 +121,22 @@ export default class LobbyScene extends Phaser.Scene {
       </main>
       ${this.modal ? this._modalHtml(this.modal) : ''}
     `;
+    formValues.forEach(([name, value]) => {
+      const field = this.root.querySelector(`[name="${name}"]`);
+      if (field) field.value = value;
+    });
     this._bindDom();
+    if (this.modal) {
+      const modal = this.root.querySelector('.modal-card');
+      const focusTarget = focusedName
+        ? modal.querySelector(`[name="${focusedName}"]`)
+        : modal;
+      (focusTarget || modal)?.focus({ preventScroll: true });
+    }
+  }
+
+  _brandMarkHtml() {
+    return '<div class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></div>';
   }
 
   _topBarHtml() {
@@ -107,80 +144,95 @@ export default class LobbyScene extends Phaser.Scene {
     return `
       <header class="topbar">
         <div class="brand-lockup">
-          <div class="brand-orb">S</div>
+          ${this._brandMarkHtml()}
           <div>
-            <h1>SEREIA PALACE</h1>
-            <p>${this._escape(user.username || 'jogadora')} &middot; ${this._escape(user.role || 'player')}</p>
+            <h1>${this._escape(BRAND.upperName)}</h1>
+            <p>Olá, ${this._escape(user.username || 'jogador')}</p>
           </div>
         </div>
         <div class="top-actions">
-          <button class="icon-btn" type="button" data-action="refresh" aria-label="Atualizar">&#8635;</button>
-          <button class="icon-btn" type="button" data-action="logout" aria-label="Sair">&times;</button>
+          <button class="icon-btn" type="button" data-action="refresh" aria-label="Atualizar conta" title="Atualizar conta">&#8635;</button>
+          <button class="icon-btn" type="button" data-action="logout" aria-label="Sair da conta" title="Sair da conta">&#8618;</button>
         </div>
       </header>
     `;
   }
 
   _lobbyHtml() {
-    const stats = this.snapshot?.stats || { rounds: 0, maxMult: 1, winRate: 0 };
     const history = this.snapshot?.history || [];
-    const bonusBalance = Number(this.snapshot?.bonus_balance || 0);
 
     return `
+      <section class="lobby-intro">
+        <span class="eyebrow">SEU ESPAÇO PARA JOGAR</span>
+        <h2>Cada bloco, uma possibilidade.</h2>
+        <p>Escolha seu próximo movimento.</p>
+      </section>
+      <div class="lobby-grid">
+        <div class="lobby-main">
+          <section class="game-card">
+            <div class="game-art" aria-hidden="true">
+              <span class="art-label">ENCAIXE. COMPLETE. REPITA.</span>
+              ${this._blockBoardHtml()}
+              <span class="art-caption">8 × 8 <i></i> INFINITAS POSSIBILIDADES</span>
+            </div>
+            <div class="game-info">
+              <div class="badges"><span>PUZZLE DE BLOCOS</span><span>DEMO</span></div>
+              <h2>${this._escape(BRAND.name)}</h2>
+              <p>Encaixe as peças, complete linhas e colunas e encontre a sua melhor sequência.</p>
+              <button class="play-btn" type="button" data-action="play">Jogar demo <span aria-hidden="true">↗</span></button>
+              <span class="demo-caption">Sem depósito. A demo não altera seu saldo.</span>
+            </div>
+          </section>
+          <section class="how-to-panel" aria-labelledby="how-to-title">
+            <div class="section-title"><h3 id="how-to-title">Seu próximo desafio</h3><span>COMO JOGAR</span></div>
+            <ol class="how-to-grid">
+              <li><span>01</span><div><strong>Encaixe as peças</strong><p>Encontre espaço no tabuleiro de 8 × 8.</p></div></li>
+              <li><span>02</span><div><strong>Complete linhas</strong><p>Preencha linhas e colunas para liberar espaço.</p></div></li>
+              <li><span>03</span><div><strong>Planeje a sequência</strong><p>Continue enquanto houver jogadas possíveis.</p></div></li>
+            </ol>
+          </section>
+        </div>
+        <aside class="lobby-sidebar" aria-label="Sua conta">
+          ${this._walletCardHtml()}
+          ${this._rolloverHtml()}
+          ${this._adminEntryHtml()}
+          <section class="history-panel">
+            <div class="section-title"><h3>Registros da conta</h3></div>
+            <p class="panel-description">Histórico registrado. Partidas demo não aparecem aqui.</p>
+            ${history.length ? history.slice(0, 5).map((round) => this._historyRowHtml(round)).join('') : '<div class="empty-state"><span aria-hidden="true">▤</span><strong>Nenhuma rodada registrada</strong><p>Você já pode experimentar a demo.</p></div>'}
+          </section>
+        </aside>
+      </div>
+    `;
+  }
+
+  _blockBoardHtml() {
+    const rows = [
+      '........',
+      '...vv...',
+      '.ccvv...',
+      '.c...pp.',
+      '.c...p..',
+      'vv...p..',
+      '.v.ccc..',
+      '.v....pp',
+    ];
+    return `<div class="block-board">${rows.join('').split('').map((cell) => `<i class="block-cell ${cell === '.' ? '' : `filled block-${cell}`}"></i>`).join('')}</div>`;
+  }
+
+  _walletCardHtml() {
+    const bonusBalance = Number(this.snapshot?.bonus_balance || 0);
+    return `
       <section class="wallet-card">
-        <span>SALDO DISPONIVEL</span>
+        <div class="wallet-heading"><span>MINHA CARTEIRA</span><span aria-hidden="true">▤</span></div>
+        <span class="balance-label">Saldo disponível</span>
         <strong>${this._money(state.balance)}</strong>
-        ${bonusBalance > 0 ? `<p class="bonus-balance">Bonus ativo: ${this._money(bonusBalance)}</p>` : ''}
+        ${bonusBalance > 0 ? `<p class="bonus-balance">Bônus ativo: ${this._money(bonusBalance)}</p>` : ''}
         <div class="wallet-actions">
-          <button class="gold-btn" type="button" data-action="deposit">Depositar</button>
+          <button class="primary-btn" type="button" data-action="deposit">Depositar</button>
           <button class="dark-btn" type="button" data-action="withdraw">Sacar Pix</button>
         </div>
-      </section>
-
-      ${this._rolloverHtml()}
-      ${this._adminEntryHtml()}
-
-      ${this.notice ? `<section class="lobby-notice">${this._escape(this.notice)}</section>` : ''}
-
-      <button class="promo-strip" type="button" data-tab="promo">
-        <span>EXCLUSIVO</span>
-        <strong>Block Game Demo</strong>
-        <em>8x8<small>PUZZLE</small></em>
-      </button>
-
-      <nav class="category-row" aria-label="Categorias">
-        <span class="active">Hot</span>
-        <span>Slots</span>
-        <span>Crash</span>
-        <span>VIP</span>
-      </nav>
-
-      <section class="game-card">
-        <div class="game-art">
-          <div class="art-glow"></div>
-          <div class="mermaid-mark">S</div>
-          <div class="gem-mark"></div>
-        </div>
-        <div class="game-info">
-          <h2>Sereia do Tesouro</h2>
-          <p>Puzzle de blocos &middot; Modo demo</p>
-          <div class="badges">
-            <span>DEMO</span>
-            <span>8X8</span>
-          </div>
-          <button class="play-btn" type="button" data-action="play">JOGAR AGORA</button>
-        </div>
-      </section>
-
-      <section class="stats-grid">
-        ${this._statHtml('Rodadas', stats.rounds || 0)}
-        ${this._statHtml('Maior mult', `${Number(stats.maxMult || 1).toFixed(2)}x`)}
-        ${this._statHtml('Vitorias', `${stats.winRate || 0}%`)}
-      </section>
-
-      <section class="history-panel">
-        <h3>ULTIMAS RODADAS</h3>
-        ${history.length ? history.slice(0, 5).map((round) => this._historyRowHtml(round)).join('') : '<p class="empty-state">Sem rodadas ainda</p>'}
+        <p class="wallet-note">A demo não movimenta esta carteira.</p>
       </section>
     `;
   }
@@ -188,27 +240,25 @@ export default class LobbyScene extends Phaser.Scene {
   _promoHtml() {
     return `
       <section class="page-heading">
-        <h2>PROMOCAO</h2>
-        <p>Campanhas ativas da Sereia Palace</p>
+        <span class="eyebrow">SUA CONTA</span>
+        <h2>Carteira</h2>
+        <p>Acompanhe o saldo e as condições da sua conta.</p>
       </section>
-
-      <section class="bonus-banner">
-        <div class="bonus-copy">
-          <span>RECARGUE E GANHE</span>
-          <strong>100%</strong>
-          <p>A PARTIR DE R$ 100 <small>bonus</small></p>
+      <div class="wallet-page-grid">
+        <div class="lobby-sidebar">
+          ${this._walletCardHtml()}
+          ${this._rolloverHtml()}
         </div>
-        <button type="button" data-action="deposit">RECARREGAR</button>
-      </section>
-
-      <section class="promo-ledger">
-        <h3>COMO FICA NA CONTA</h3>
-        ${this._promoLineHtml('Recarga', 'R$ 100,00')}
-        ${this._promoLineHtml('Bonus', '+ R$ 100,00', true)}
-        ${this._promoLineHtml('Saldo', 'R$ 200,00', true)}
-        ${this._promoLineHtml('Rollover saque', 'R$ 400,00')}
-        <p>Bonus de 100% somente para depositos de R$ 100,00 ou mais. Depositos menores entram sem bonus e exigem 2x de movimentacao.</p>
-      </section>
+        <section class="promo-ledger">
+          <h3>Regras da carteira</h3>
+          <p>O saldo é creditado após a confirmação do Pix. Estas são as regras atuais para depósitos:</p>
+          ${this._promoLineHtml('Depósitos abaixo de R$ 100', 'Sem bônus')}
+          ${this._promoLineHtml('Depósitos a partir de R$ 100', '100% de bônus')}
+          ${this._promoLineHtml('Movimentação exigida para saque', '2× o crédito total')}
+          <p class="rules-example">Exemplo: um depósito de R$ 100 gera R$ 200 de crédito total e exige R$ 400 de movimentação.</p>
+          <div class="demo-note"><strong>Sobre a demo</strong><p>As partidas de ${this._escape(BRAND.name)} são simuladas: não geram créditos, débitos nem progresso de rollover.</p></div>
+        </section>
+      </div>
     `;
   }
 
@@ -216,11 +266,11 @@ export default class LobbyScene extends Phaser.Scene {
     const user = this.snapshot?.user || this.user || {};
     const stats = this.snapshot?.stats || { rounds: 0, maxMult: 1, winRate: 0 };
     const rollover = this._rollover();
-    const initial = String(user.username || 'S').slice(0, 1).toUpperCase();
+    const initial = String(user.username || 'B').slice(0, 1).toUpperCase();
 
     return `
       <section class="page-heading">
-        <h2>PERFIL</h2>
+        <span class="eyebrow">SUA CONTA</span><h2>Perfil</h2>
         <p>Dados da sua conta</p>
       </section>
 
@@ -228,29 +278,30 @@ export default class LobbyScene extends Phaser.Scene {
         <div class="profile-head">
           <div class="profile-avatar">${this._escape(initial)}</div>
           <div>
-            <h2>${this._escape(user.username || 'jogadora')}</h2>
-            <span>${this._escape(user.role || 'player')}</span>
+            <h2>${this._escape(user.username || 'jogador')}</h2>
+            <span>${this._isAdmin() ? 'Administrador' : 'Jogador'}</span>
           </div>
         </div>
-        ${this._profileRowHtml('Email', user.email || '-')}
+        ${this._profileRowHtml('E-mail', user.email || '-')}
         ${this._profileRowHtml('Telefone', user.phone || '-')}
         ${this._profileRowHtml('Nome', user.legal_name || '-')}
         ${this._profileRowHtml('CPF/CNPJ', user.document_masked || '-')}
         ${this._profileRowHtml('Origem', user.referral_code || '-')}
         ${this._profileRowHtml('Saldo', this._money(state.balance))}
-        ${this._profileRowHtml('Bonus', this._money(this.snapshot?.bonus_balance || 0))}
-        ${this._profileRowHtml('Falta rollover', this._money(rollover.remaining || 0))}
+        ${this._profileRowHtml('Bônus', this._money(this.snapshot?.bonus_balance || 0))}
+        ${this._profileRowHtml('Rollover restante', this._money(rollover.remaining || 0))}
       </section>
 
+      <p class="panel-description">Estatísticas dos registros da conta. Não incluem partidas demo.</p>
       <section class="stats-grid profile-stats">
-        ${this._statHtml('Rodadas', stats.rounds || 0)}
-        ${this._statHtml('Maior mult', `${Number(stats.maxMult || 1).toFixed(2)}x`)}
-        ${this._statHtml('Vitorias', `${stats.winRate || 0}%`)}
+        ${this._statHtml('Rodadas registradas', stats.rounds || 0)}
+        ${this._statHtml('Maior multiplicador', `${Number(stats.maxMult || 1).toFixed(2)}x`)}
+        ${this._statHtml('Vitórias', `${stats.winRate || 0}%`)}
       </section>
 
       <section class="profile-actions">
-        ${this._isAdmin() ? '<button class="gold-btn" type="button" data-action="admin">Painel Admin</button>' : ''}
-        <button class="gold-btn" type="button" data-action="refresh">Atualizar</button>
+        ${this._isAdmin() ? '<button class="primary-btn" type="button" data-action="admin">Painel administrativo</button>' : ''}
+        <button class="primary-btn" type="button" data-action="refresh">Atualizar</button>
         <button class="dark-btn" type="button" data-action="logout">Sair</button>
       </section>
     `;
@@ -266,19 +317,19 @@ export default class LobbyScene extends Phaser.Scene {
     if (!this._isAdmin()) return '';
     return `
       <button class="admin-entry" type="button" data-action="admin">
-        <span>OPERACAO</span>
-        <strong>Painel Admin</strong>
-        <em>Aquisicao, influenciadores e campanhas</em>
+        <span>ADMINISTRAÇÃO</span>
+        <strong>Painel administrativo</strong>
+        <em>Aquisição, influenciadores e campanhas</em>
       </button>
     `;
   }
 
   _bottomNavHtml() {
     return `
-      <nav class="bottom-nav">
+      <nav class="bottom-nav" aria-label="Navegação principal">
         ${TABS.map((tab) => `
-          <button class="${this.currentTab === tab.key ? 'active' : ''}" type="button" data-tab="${tab.key}">
-            <span>${this.currentTab === tab.key ? '◆' : '◇'}</span>
+          <button class="${this.currentTab === tab.key ? 'active' : ''}" type="button" data-tab="${tab.key}" ${this.currentTab === tab.key ? 'aria-current="page"' : ''}>
+            <span aria-hidden="true">${tab.icon}</span>
             ${tab.label}
           </button>
         `).join('')}
@@ -290,7 +341,7 @@ export default class LobbyScene extends Phaser.Scene {
     const isDeposit = type === 'deposit';
     const title = isDeposit ? 'Depositar via Pix' : 'Sacar via Pix';
     const message = this.walletMessage
-      ? `<span class="wallet-message">${this._escape(this.walletMessage)}</span>`
+      ? `<span class="wallet-message" role="status">${this._escape(this.walletMessage)}</span>`
       : '';
     const deposit = this.currentDeposit?.intent;
     const user = this.snapshot?.user || this.user || {};
@@ -301,9 +352,9 @@ export default class LobbyScene extends Phaser.Scene {
     if (isDeposit) {
       return `
         <div class="modal-backdrop" data-action="close-modal">
-          <section class="modal-card wallet-modal" role="dialog" aria-modal="true" aria-label="${title}">
+          <section class="modal-card wallet-modal" data-modal="${type}" tabindex="-1" role="dialog" aria-modal="true" aria-label="${title}">
             <h2>${title}</h2>
-            <p>Escolha um valor para gerar um Pix. O saldo entra somente apos confirmacao do pagamento.</p>
+            <p>Escolha um valor para gerar um Pix. O saldo entra somente após a confirmação do pagamento. A demo não exige depósito.</p>
             ${needsCustomer ? `
               <label>
                 Nome completo
@@ -315,7 +366,7 @@ export default class LobbyScene extends Phaser.Scene {
               </label>
             ` : ''}
             <div class="amount-grid">
-              ${[20, 50, 100, 200].map((amount) => `<button type="button" data-action="deposit-create" data-amount="${amount}">R$ ${amount}</button>`).join('')}
+              ${[20, 50, 100, 200].map((amount) => `<button type="button" data-action="deposit-create" data-amount="${amount}" ${this.walletBusy ? 'disabled' : ''}>R$ ${amount}</button>`).join('')}
             </div>
             ${deposit ? `
               <div class="pix-box">
@@ -323,10 +374,10 @@ export default class LobbyScene extends Phaser.Scene {
                 <span>${this._depositPreviewText(deposit.amount)}</span>
                 <code>${this._escape(deposit.pix_copy_paste || '')}</code>
               </div>
-              ${this.currentDeposit?.sandbox ? `<button type="button" data-action="deposit-confirm" data-intent-id="${this._escape(deposit.id)}">SIMULAR PIX PAGO</button>` : ''}
+              ${this.currentDeposit?.sandbox ? `<button type="button" data-action="deposit-confirm" data-intent-id="${this._escape(deposit.id)}" ${this.walletBusy ? 'disabled' : ''}>Simular Pix pago</button>` : ''}
             ` : ''}
             ${message}
-            <button type="button" data-action="close-modal">FECHAR</button>
+            <button type="button" data-action="close-modal" ${this.walletBusy ? 'disabled' : ''}>Fechar</button>
           </section>
         </div>
       `;
@@ -334,7 +385,7 @@ export default class LobbyScene extends Phaser.Scene {
 
     return `
       <div class="modal-backdrop" data-action="close-modal">
-        <section class="modal-card wallet-modal" role="dialog" aria-modal="true" aria-label="${title}">
+        <section class="modal-card wallet-modal" data-modal="${type}" tabindex="-1" role="dialog" aria-modal="true" aria-label="${title}">
           <h2>${title}</h2>
           <p>${canWithdraw ? 'Solicite o saque para uma chave Pix. O valor fica reservado na carteira.' : `Movimente mais ${this._money(rollover.remaining || 0)} antes de sacar.`}</p>
           ${!canWithdraw ? this._rolloverHtml(true) : ''}
@@ -344,11 +395,11 @@ export default class LobbyScene extends Phaser.Scene {
           </label>
           <label>
             Chave Pix
-            <input name="withdraw-key" placeholder="email, telefone, CPF ou aleatoria" />
+            <input name="withdraw-key" placeholder="E-mail, telefone, CPF ou aleatória" />
           </label>
-          <select name="withdraw-key-type">
-            <option value="random">Aleatoria</option>
-            <option value="email">Email</option>
+          <select name="withdraw-key-type" aria-label="Tipo de chave Pix">
+            <option value="random">Aleatória</option>
+            <option value="email">E-mail</option>
             <option value="phone">Telefone</option>
             <option value="cpf">CPF</option>
             <option value="cnpj">CNPJ</option>
@@ -361,13 +412,13 @@ export default class LobbyScene extends Phaser.Scene {
             Documento do titular
             <input name="withdraw-owner-document" inputmode="numeric" placeholder="CPF ou CNPJ" />
           </label>
-          <select name="withdraw-owner-document-type">
+          <select name="withdraw-owner-document-type" aria-label="Tipo de documento do titular">
             <option value="cpf">CPF</option>
             <option value="cnpj">CNPJ</option>
           </select>
-          <button type="button" data-action="withdraw-submit" ${canWithdraw ? '' : 'disabled'}>SOLICITAR SAQUE</button>
+          <button type="button" data-action="withdraw-submit" ${canWithdraw && !this.walletBusy ? '' : 'disabled'}>Solicitar saque</button>
           ${message}
-          <button type="button" data-action="close-modal">FECHAR</button>
+          <button type="button" data-action="close-modal" ${this.walletBusy ? 'disabled' : ''}>Fechar</button>
         </section>
       </div>
     `;
@@ -387,7 +438,7 @@ export default class LobbyScene extends Phaser.Scene {
     const payout = Number(round.payout || 0);
     return `
       <div class="history-row ${won ? 'won' : 'lost'}">
-        <span>${won ? 'WIN' : 'LOSS'}</span>
+        <span>${won ? 'Vitória' : 'Perda'}</span>
         <strong>${Number(round.mult || 1).toFixed(2)}x</strong>
         <em>${won ? '+' : ''}${this._money(payout)}</em>
       </div>
@@ -428,8 +479,8 @@ export default class LobbyScene extends Phaser.Scene {
       return compact ? '' : `
         <section class="rollover-card complete">
           <div>
-            <span>SAQUE LIBERADO</span>
-            <strong>Rollover completo</strong>
+            <span>ROLLOVER DA CONTA</span>
+            <strong>Sem movimentação pendente</strong>
           </div>
         </section>
       `;
@@ -449,6 +500,7 @@ export default class LobbyScene extends Phaser.Scene {
           <span>${this._money(rollover.progress || 0)} / ${this._money(rollover.required || 0)}</span>
           <strong>Falta ${this._money(rollover.remaining || 0)}</strong>
         </div>
+        <p class="panel-description">A demo não conta para o rollover.</p>
       </section>
     `;
   }
@@ -459,17 +511,19 @@ export default class LobbyScene extends Phaser.Scene {
     const credit = value + bonus;
     const rollover = credit * 2;
     if (bonus > 0) {
-      return `Credito ${this._money(credit)} com bonus. Rollover ${this._money(rollover)}.`;
+      return `Crédito ${this._money(credit)} com bônus. Rollover ${this._money(rollover)}.`;
     }
-    return `Credito ${this._money(value)}. Rollover ${this._money(rollover)}.`;
+    return `Crédito ${this._money(value)}. Rollover ${this._money(rollover)}.`;
   }
 
   _bindDom() {
     this.root.querySelectorAll('[data-tab]').forEach((button) => {
       button.addEventListener('click', () => {
         this.currentTab = button.dataset.tab;
+        this.root.scrollTop = 0;
         this.modal = null;
         this._render();
+        this.root.querySelector(`[data-tab="${this.currentTab}"]`)?.focus({ preventScroll: true });
       });
     });
 
@@ -478,10 +532,7 @@ export default class LobbyScene extends Phaser.Scene {
         const action = button.dataset.action;
         if (action === 'close-modal') {
           event.stopPropagation();
-          this.modal = null;
-          this.walletMessage = '';
-          this.currentDeposit = null;
-          this._render();
+          this._closeModal();
         } else if (action === 'deposit' || action === 'withdraw') {
           this.modal = action;
           this.walletMessage = '';
@@ -518,6 +569,7 @@ export default class LobbyScene extends Phaser.Scene {
 
   async _createDeposit(amount) {
     if (this.walletBusy) return;
+    const mountedRoot = this.root;
     const nameInput = this.root.querySelector('[name="deposit-customer-name"]');
     const documentInput = this.root.querySelector('[name="deposit-customer-document"]');
     const customerName = String(nameInput?.value || '').trim();
@@ -534,36 +586,49 @@ export default class LobbyScene extends Phaser.Scene {
     this._render();
 
     try {
-      this.currentDeposit = await createDepositIntent(amount, customerName, customerDocument, 'cpf');
+      const deposit = await createDepositIntent(amount, customerName, customerDocument, 'cpf');
+      if (this.root !== mountedRoot) return;
+      this.currentDeposit = deposit;
       this.walletMessage = this.currentDeposit?.sandbox ? 'Pix sandbox criado.' : 'Pix real criado. Aguardando pagamento.';
     } catch (error) {
-      this.walletMessage = error.message || 'Falha ao gerar deposito.';
+      if (this.root !== mountedRoot) return;
+      this.walletMessage = error.message || 'Falha ao gerar depósito.';
     } finally {
-      this.walletBusy = false;
-      this._render();
+      if (this.root === mountedRoot) {
+        this.walletBusy = false;
+        this._render();
+      }
     }
   }
 
   async _confirmDeposit(intentId) {
     if (this.walletBusy || !intentId) return;
+    const mountedRoot = this.root;
     this.walletBusy = true;
     this.walletMessage = 'Confirmando pagamento sandbox...';
     this._render();
 
     try {
       await confirmSandboxDeposit(intentId);
-      this.walletMessage = 'Deposito confirmado.';
+      if (this.root !== mountedRoot) return;
+      this.notice = 'Depósito confirmado.';
+      this.walletMessage = '';
       await this._loadLobby();
     } catch (error) {
-      this.walletMessage = error.message || 'Falha ao confirmar deposito.';
+      if (this.root !== mountedRoot) return;
+      this.walletMessage = error.message || 'Falha ao confirmar depósito.';
       this._render();
     } finally {
-      this.walletBusy = false;
+      if (this.root === mountedRoot) {
+        this.walletBusy = false;
+        this._render();
+      }
     }
   }
 
   async _submitWithdrawal() {
     if (this.walletBusy) return;
+    const mountedRoot = this.root;
     const rollover = this._rollover();
     if (!rollover.complete) {
       this.walletMessage = `Movimente mais ${this._money(rollover.remaining || 0)} antes de sacar.`;
@@ -585,12 +650,12 @@ export default class LobbyScene extends Phaser.Scene {
     const ownerDocumentType = String(ownerDocumentTypeInput?.value || 'cpf');
 
     if (!Number.isFinite(amount) || amount < 20) {
-      this.walletMessage = 'Valor minimo para saque: R$ 20,00.';
+      this.walletMessage = 'Valor mínimo para saque: R$ 20,00.';
       this._render();
       return;
     }
     if (pixKey.length < 5) {
-      this.walletMessage = 'Informe uma chave Pix valida.';
+      this.walletMessage = 'Informe uma chave Pix válida.';
       this._render();
       return;
     }
@@ -606,902 +671,314 @@ export default class LobbyScene extends Phaser.Scene {
 
     try {
       await requestWithdrawal(amount, pixKey, pixKeyType, ownerName, ownerDocument, ownerDocumentType);
-      this.walletMessage = 'Saque solicitado.';
+      if (this.root !== mountedRoot) return;
+      this.notice = 'Saque solicitado. O valor está reservado na carteira.';
+      this.walletMessage = '';
       await this._loadLobby();
     } catch (error) {
+      if (this.root !== mountedRoot) return;
       this.walletMessage = error.message || 'Falha ao solicitar saque.';
       this._render();
     } finally {
-      this.walletBusy = false;
+      if (this.root === mountedRoot) {
+        this.walletBusy = false;
+        this._render();
+      }
     }
+  }
+
+  _onKeyDown(event) {
+    if (!this.modal) return;
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      this._closeModal();
+      return;
+    }
+    if (event.key !== 'Tab') return;
+    const modal = this.root.querySelector('.modal-card');
+    const focusable = [...modal.querySelectorAll('button:not(:disabled), input, select')];
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+    if (event.shiftKey && (document.activeElement === first || document.activeElement === modal)) {
+      event.preventDefault();
+      last?.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first?.focus();
+    }
+  }
+
+  _closeModal() {
+    if (this.walletBusy) return;
+    const action = this.modal;
+    this.modal = null;
+    this.walletMessage = '';
+    this.currentDeposit = null;
+    this._render();
+    this.root?.querySelector(`[data-action="${action}"]`)?.focus({ preventScroll: true });
   }
 
   _drawBackground() {
     const g = this.add.graphics();
-    g.fillGradientStyle(CLR.redDark, CLR.redDark, CLR.deep, CLR.deep, 1);
+    g.fillStyle(0x090b1a);
     g.fillRect(0, 0, W, H);
-
-    g.fillStyle(0x000000, 0.28);
-    for (let y = 0; y < H; y += 46) {
-      g.fillRect(0, y, W, 1);
-    }
-
-    for (let i = 0; i < 10; i++) {
-      const x = -30 + i * 52;
-      g.fillStyle(i % 2 ? CLR.gold : CLR.red, 0.10);
-      g.fillTriangle(x, 0, x + 34, 0, x + 6, 260);
-    }
-
-    g.lineStyle(2, CLR.gold, 0.25);
-    g.strokeCircle(W + 8, 42, 86);
-    g.strokeCircle(-16, H - 26, 116);
-  }
-
-  _floatGold() {
-    const dots = Array.from({ length: 18 }, () => {
-      const dot = this.add.circle(
-        Phaser.Math.Between(0, W),
-        Phaser.Math.Between(0, H),
-        Phaser.Math.Between(1, 3),
-        CLR.gold,
-        Phaser.Math.FloatBetween(0.10, 0.25),
-      );
-      return { dot, vy: Phaser.Math.Between(12, 30) };
-    });
-
-    this._subs.push(this.time.addEvent({
-      delay: 33,
-      loop: true,
-      callback: () => {
-        dots.forEach((item) => {
-          item.dot.y -= item.vy * 0.033;
-          if (item.dot.y < -8) {
-            item.dot.x = Phaser.Math.Between(0, W);
-            item.dot.y = H + 8;
-          }
-        });
-      },
-    }));
   }
 
   _style() {
     return `
       <style>
-        .sereia-lobby-root {
+        .block-lobby-root {
           position: fixed;
           inset: 0;
           height: var(--app-height, 100dvh);
           z-index: 18;
-          color: #fff7dc;
-          font-family: Arial, Helvetica, sans-serif;
-          -webkit-font-smoothing: antialiased;
-          text-rendering: geometricPrecision;
-          pointer-events: auto;
           overflow-y: auto;
           overscroll-behavior: contain;
           -webkit-overflow-scrolling: touch;
+          color: var(--color-text);
+          background: radial-gradient(ellipse at 10% 0%, #201b403b, transparent 50%), var(--color-bg);
+          font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+          -webkit-font-smoothing: antialiased;
         }
-        .sereia-lobby-root * { box-sizing: border-box; }
-        .lobby-shell {
-          width: min(430px, 100vw);
+        .block-lobby-root *, .block-lobby-root *::before, .block-lobby-root *::after { box-sizing: border-box; }
+        .block-lobby-root :is(h1, h2, h3, p) { margin: 0; }
+        .block-lobby-root :is(button, input, select) { font: inherit; }
+        .block-lobby-root button { cursor: pointer; border: 0; -webkit-tap-highlight-color: transparent; }
+        .block-lobby-root button:disabled { opacity: .5; cursor: not-allowed; }
+        .block-lobby-root :is(button, input, select):focus-visible { outline: 2px solid var(--color-accent); outline-offset: 4px; }
+        .block-lobby-root .lobby-shell {
+          width: min(1080px, 100%);
           min-height: var(--app-height, 100dvh);
           margin: 0 auto;
-          padding: max(14px, env(safe-area-inset-top)) 14px calc(62px + env(safe-area-inset-bottom));
-          pointer-events: auto;
+          padding: max(24px, env(safe-area-inset-top)) 28px calc(108px + env(safe-area-inset-bottom));
           display: flex;
           flex-direction: column;
-          gap: 12px;
+          gap: 32px;
         }
-        .loading-shell {
-          justify-content: center;
-          align-items: center;
-        }
-        .loading-card {
-          width: min(300px, calc(100vw - 36px));
-          padding: 24px 20px;
-          border-radius: 14px;
-          border: 1px solid rgba(244, 200, 74, 0.58);
-          background: linear-gradient(180deg, rgba(92, 8, 22, 0.95), rgba(8, 7, 17, 0.98));
-          box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+        .block-lobby-root .loading-shell { justify-content: center; align-items: center; }
+        .block-lobby-root .loading-card {
+          width: min(360px, 100%);
+          padding: 36px 24px;
+          border: 1px solid var(--color-border);
+          border-radius: 24px;
+          background: var(--color-panel);
           display: grid;
           justify-items: center;
-          gap: 8px;
-        }
-        .loading-card strong {
-          color: #ffdf72;
-          font-size: 18px;
-          font-weight: 900;
-        }
-        .loading-card span {
-          color: #ffd0be;
-          font-size: 13px;
-        }
-        .topbar {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          min-height: 46px;
-        }
-        .brand-lockup {
-          display: flex;
-          align-items: center;
-          gap: 10px;
-          min-width: 0;
-        }
-        .brand-orb {
-          width: 40px;
-          height: 40px;
-          border-radius: 50%;
-          display: grid;
-          place-items: center;
-          flex: 0 0 auto;
-          color: #ffeb9a;
-          font: 900 22px/1 "Arial Black", Arial, sans-serif;
-          background: radial-gradient(circle at 35% 24%, #e65b6a 0, #9f1426 50%, #4a0612 100%);
-          border: 1px solid rgba(255, 229, 141, 0.75);
-          box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
-        }
-        h1, h2, h3, p { margin: 0; }
-        .brand-lockup h1 {
-          color: #ffdf72;
-          font: 900 18px/1.05 "Arial Black", Arial, sans-serif;
-          text-shadow: 0 2px 0 #5d1600;
-        }
-        .brand-lockup p {
-          margin-top: 4px;
-          color: #e0b39a;
-          font-size: 12px;
-          font-weight: 700;
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          max-width: 210px;
-        }
-        .top-actions {
-          display: flex;
-          gap: 8px;
-        }
-        button {
-          font-family: inherit;
-          border: 0;
-          cursor: pointer;
-          -webkit-tap-highlight-color: transparent;
-        }
-        .icon-btn {
-          width: 38px;
-          height: 36px;
-          border-radius: 10px;
-          color: #ffdf72;
-          font: 900 13px/1 "Arial Black", Arial, sans-serif;
-          background: rgba(29, 19, 32, 0.92);
-          border: 1px solid rgba(112, 66, 30, 0.82);
-        }
-        .lobby-content {
-          display: flex;
-          flex-direction: column;
-          gap: 12px;
-          min-height: 0;
-        }
-        .wallet-card,
-        .rollover-card,
-        .admin-entry,
-        .game-card,
-        .history-panel,
-        .promo-ledger,
-        .profile-card {
-          border-radius: 12px;
-          border: 1px solid rgba(244, 200, 74, 0.52);
-          background: linear-gradient(180deg, rgba(45, 16, 20, 0.95), rgba(14, 11, 18, 0.96));
-          box-shadow: 0 12px 34px rgba(0, 0, 0, 0.30), inset 0 1px 0 rgba(255, 255, 255, 0.08);
-        }
-        .wallet-card {
-          position: relative;
-          overflow: hidden;
-          padding: 16px 16px 14px;
-        }
-        .wallet-card::after {
-          content: "";
-          position: absolute;
-          width: 118px;
-          height: 118px;
-          right: -28px;
-          top: -34px;
-          border-radius: 50%;
-          background: rgba(244, 200, 74, 0.16);
-        }
-        .wallet-card > span,
-        .history-panel h3,
-        .promo-ledger h3 {
-          display: block;
-          color: #f4c84a;
-          font: 900 12px/1.1 "Arial Black", Arial, sans-serif;
-          margin-bottom: 7px;
-        }
-        .wallet-card > strong {
-          display: block;
-          position: relative;
-          z-index: 1;
-          color: #fff7dc;
-          font: 900 36px/1 "Arial Black", Arial, sans-serif;
-          text-shadow: 0 3px 0 rgba(0, 0, 0, 0.35);
-          margin-bottom: 12px;
-        }
-        .bonus-balance {
-          position: relative;
-          z-index: 1;
-          margin: -4px 0 12px;
-          color: #80ffd7;
-          font-size: 13px;
-          font-weight: 900;
-        }
-        .rollover-card {
-          padding: 12px;
-          display: grid;
-          gap: 9px;
-        }
-        .lobby-notice {
-          padding: 12px;
-          border-radius: 10px;
-          color: #fff7dc;
-          background: rgba(159, 20, 38, 0.84);
-          border: 1px solid rgba(255, 157, 165, 0.45);
-          font-size: 13px;
-          font-weight: 900;
-          line-height: 1.25;
-        }
-        .rollover-card.complete {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-        }
-        .rollover-card.complete span,
-        .rollover-head span {
-          display: block;
-          color: #f4c84a;
-          font: 900 11px/1 "Arial Black", Arial, sans-serif;
-        }
-        .rollover-card.complete strong {
-          display: block;
-          margin-top: 5px;
-          color: #80ffd7;
-          font: 900 16px/1 "Arial Black", Arial, sans-serif;
-        }
-        .rollover-card.compact {
-          border-radius: 10px;
-          padding: 10px;
-          background: rgba(23, 17, 29, 0.96);
-        }
-        .rollover-head {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 12px;
-        }
-        .rollover-head strong {
-          color: #fff7dc;
-          font: 900 15px/1 "Arial Black", Arial, sans-serif;
-        }
-        .rollover-progress {
-          height: 9px;
-          border-radius: 999px;
-          overflow: hidden;
-          background: rgba(0, 0, 0, 0.38);
-          border: 1px solid rgba(244, 200, 74, 0.20);
-        }
-        .rollover-progress i {
-          display: block;
-          height: 100%;
-          min-width: 0;
-          border-radius: inherit;
-          background: linear-gradient(90deg, #37d9ff, #80ffd7, #f4c84a);
-        }
-        .rollover-lines {
-          display: flex;
-          justify-content: space-between;
-          gap: 10px;
-          color: #e0b39a;
-          font-size: 12px;
-          font-weight: 900;
-        }
-        .rollover-lines strong {
-          color: #ffdf72;
-          font-size: 12px;
-        }
-        .admin-entry {
-          width: 100%;
-          min-height: 76px;
-          display: grid;
-          gap: 5px;
-          text-align: left;
-          padding: 13px 14px;
-          color: #fff7dc;
-          background:
-            linear-gradient(135deg, rgba(23, 35, 58, 0.96), rgba(59, 16, 28, 0.96)),
-            radial-gradient(circle at top right, rgba(244, 200, 74, 0.18), transparent 40%);
-        }
-        .admin-entry span {
-          color: #80ffd7;
-          font: 900 11px/1 "Arial Black", Arial, sans-serif;
-        }
-        .admin-entry strong {
-          color: #ffdf72;
-          font: 900 18px/1 "Arial Black", Arial, sans-serif;
-        }
-        .admin-entry em {
-          color: #ffd0be;
-          font-size: 12px;
-          font-style: normal;
-          font-weight: 800;
-        }
-        .wallet-actions,
-        .profile-actions {
-          display: grid;
-          grid-template-columns: 1fr 1fr;
-          gap: 10px;
-        }
-        .gold-btn,
-        .dark-btn,
-        .play-btn,
-        .bonus-banner button,
-        .modal-card button {
-          min-height: 42px;
-          border-radius: 10px;
-          font: 900 13px/1 "Arial Black", Arial, sans-serif;
-        }
-        .gold-btn {
-          color: #2a070c;
-          background: linear-gradient(180deg, #ffe58d, #d59d19 58%, #8d1c18);
-          box-shadow: 0 7px 0 rgba(74, 0, 12, 0.58);
-        }
-        .dark-btn {
-          color: #fff7dc;
-          background: linear-gradient(180deg, #17233a, #101521);
-          border: 1px solid rgba(84, 119, 177, 0.58);
-        }
-        .promo-strip {
-          width: 100%;
-          min-height: 72px;
-          border-radius: 12px;
-          padding: 12px 14px;
-          display: grid;
-          grid-template-columns: 1fr auto;
-          align-items: center;
-          text-align: left;
-          color: #fff7dc;
-          background: linear-gradient(180deg, #cf2038, #7c1021);
-          border: 1px solid rgba(255, 229, 141, 0.62);
-        }
-        .promo-strip span {
-          width: max-content;
-          padding: 4px 8px;
-          border-radius: 7px;
-          color: #350006;
-          background: #ffdf72;
-          font: 900 11px/1 "Arial Black", Arial, sans-serif;
-        }
-        .promo-strip strong {
-          display: block;
-          margin-top: 8px;
-          font: 900 21px/1 "Arial Black", Arial, sans-serif;
-        }
-        .promo-strip em {
-          grid-row: 1 / span 2;
-          grid-column: 2;
-          color: #ffdf72;
-          font: 900 22px/0.9 "Arial Black", Arial, sans-serif;
-          text-align: right;
-          font-style: normal;
-        }
-        .promo-strip small {
-          display: block;
-          margin-top: 4px;
-          font-size: 12px;
-        }
-        .category-row {
-          display: grid;
-          grid-template-columns: repeat(4, 1fr);
-          gap: 8px;
-        }
-        .category-row span {
-          min-height: 34px;
-          display: grid;
-          place-items: center;
-          border-radius: 999px;
-          color: #ffdca0;
-          background: rgba(33, 21, 33, 0.94);
-          border: 1px solid rgba(112, 66, 30, 0.70);
-          font: 900 13px/1 "Arial Black", Arial, sans-serif;
-        }
-        .category-row .active {
-          color: #330009;
-          background: linear-gradient(180deg, #ffe58d, #f4c84a);
-          border-color: #ffe58d;
-        }
-        .game-card {
-          display: grid;
-          grid-template-columns: 132px 1fr;
-          gap: 14px;
-          padding: 12px;
-        }
-        .game-art {
-          position: relative;
-          min-height: 132px;
-          border-radius: 12px;
-          overflow: hidden;
-          background: linear-gradient(180deg, #113251, #041120);
-          border: 1px solid rgba(55, 217, 255, 0.35);
-        }
-        .art-glow,
-        .mermaid-mark,
-        .gem-mark {
-          position: absolute;
-        }
-        .art-glow {
-          width: 106px;
-          height: 106px;
-          left: 12px;
-          top: 20px;
-          border-radius: 50%;
-          background: radial-gradient(circle, rgba(55, 217, 255, 0.28), rgba(55, 217, 255, 0.03) 64%);
-        }
-        .mermaid-mark {
-          width: 70px;
-          height: 70px;
-          left: 31px;
-          top: 30px;
-          display: grid;
-          place-items: center;
-          border-radius: 50%;
-          color: #ffdf72;
-          font: 900 46px/1 "Arial Black", Arial, sans-serif;
-          background: radial-gradient(circle at 35% 28%, #62f5e8, #1d7e9a 52%, #08243b);
-          border: 2px solid rgba(255, 229, 141, 0.75);
-        }
-        .gem-mark {
-          width: 28px;
-          height: 28px;
-          right: 18px;
-          bottom: 20px;
-          transform: rotate(45deg);
-          background: linear-gradient(135deg, #d7fbff, #37d9ff 45%, #0d7490);
-          border: 1px solid rgba(255, 255, 255, 0.70);
-          box-shadow: 0 0 18px rgba(55, 217, 255, 0.55);
-        }
-        .game-info {
-          min-width: 0;
-          display: flex;
-          flex-direction: column;
-          justify-content: space-between;
-        }
-        .game-info h2 {
-          color: #ffdf72;
-          font: 900 21px/1.05 "Arial Black", Arial, sans-serif;
-        }
-        .game-info p {
-          color: #ffd0be;
-          font-size: 13px;
-          font-weight: 700;
-        }
-        .badges {
-          display: flex;
-          flex-wrap: wrap;
-          gap: 6px;
-        }
-        .badges span {
-          padding: 6px 8px;
-          border-radius: 7px;
-          color: #80ffd7;
-          background: #123d2d;
-          font: 900 10px/1 "Arial Black", Arial, sans-serif;
-        }
-        .badges span + span {
-          color: #ffdca0;
-          background: #3f1420;
-        }
-        .play-btn {
-          width: 100%;
-          color: #330009;
-          background: linear-gradient(180deg, #ffe58d, #d89819);
-          box-shadow: 0 7px 0 rgba(74, 0, 12, 0.62);
-        }
-        .stats-grid {
-          display: grid;
-          grid-template-columns: repeat(3, 1fr);
-          gap: 10px;
-        }
-        .stats-grid article {
-          min-height: 62px;
-          padding: 12px 10px;
-          border-radius: 10px;
-          background: rgba(23, 17, 29, 0.94);
-          border: 1px solid rgba(112, 66, 30, 0.76);
-        }
-        .stats-grid span {
-          display: block;
-          color: #e0b39a;
-          font-size: 12px;
-          font-weight: 800;
-          margin-bottom: 6px;
-        }
-        .stats-grid strong {
-          color: #fff7dc;
-          font: 900 19px/1 "Arial Black", Arial, sans-serif;
-        }
-        .history-panel {
-          padding: 13px 12px;
-        }
-        .history-row {
-          min-height: 32px;
-          padding: 7px 10px;
-          border-radius: 8px;
-          display: grid;
-          grid-template-columns: 62px 1fr auto;
-          align-items: center;
-          gap: 8px;
-          background: rgba(48, 16, 24, 0.94);
-          margin-top: 8px;
-        }
-        .history-row.won {
-          background: rgba(13, 43, 36, 0.94);
-        }
-        .history-row span,
-        .history-row strong,
-        .history-row em {
-          font: 900 13px/1 "Arial Black", Arial, sans-serif;
-          font-style: normal;
-        }
-        .history-row span,
-        .history-row em {
-          color: #ff6b7b;
-        }
-        .history-row.won span,
-        .history-row.won em {
-          color: #80ffd7;
-        }
-        .history-row strong {
-          color: #fff7dc;
-        }
-        .empty-state {
-          min-height: 54px;
-          display: grid;
-          place-items: center;
-          color: #e0b39a;
-          font-size: 14px;
-          font-weight: 700;
-        }
-        .page-heading {
-          padding: 2px 2px 0;
-        }
-        .page-heading h2 {
-          color: #ffdf72;
-          font: 900 20px/1 "Arial Black", Arial, sans-serif;
-        }
-        .page-heading p {
-          margin-top: 5px;
-          color: #ffd0be;
-          font-size: 13px;
-          font-weight: 700;
-        }
-        .bonus-banner {
-          min-height: 188px;
-          border-radius: 14px;
-          padding: 18px 20px;
-          position: relative;
-          overflow: hidden;
-          display: flex;
-          flex-direction: column;
-          justify-content: space-between;
-          background: linear-gradient(145deg, #f7c948 0%, #d79a21 42%, #b0162b 100%);
-          border: 2px solid rgba(255, 240, 166, 0.78);
-          box-shadow: 0 20px 50px rgba(0, 0, 0, 0.34);
-        }
-        .bonus-banner::before,
-        .bonus-banner::after {
-          content: "";
-          position: absolute;
-          border-radius: 50%;
-          pointer-events: none;
-        }
-        .bonus-banner::before {
-          width: 160px;
-          height: 160px;
-          right: -42px;
-          top: -54px;
-          background: rgba(74, 6, 18, 0.24);
-        }
-        .bonus-banner::after {
-          width: 132px;
-          height: 132px;
-          left: -36px;
-          bottom: -48px;
-          background: rgba(255, 255, 255, 0.14);
-        }
-        .bonus-copy {
-          position: relative;
-          z-index: 1;
-        }
-        .bonus-copy span {
-          color: #3a050f;
-          font: 900 15px/1 "Arial Black", Arial, sans-serif;
-        }
-        .bonus-copy strong {
-          display: block;
-          color: #fff7dc;
-          font: 900 62px/0.9 "Arial Black", Arial, sans-serif;
-          text-shadow: 0 5px 0 rgba(100, 16, 23, 0.86);
-          margin: 12px 0 6px;
-        }
-        .bonus-copy p {
-          color: #ffe8ac;
-          font: 900 14px/1 "Arial Black", Arial, sans-serif;
-        }
-        .bonus-copy small {
-          font-size: 10px;
-          opacity: 0.92;
-        }
-        .bonus-banner button {
-          position: relative;
-          z-index: 1;
-          width: 150px;
-          color: #fff7dc;
-          background: linear-gradient(180deg, #2b0a12, #721521);
-          border: 1px solid rgba(255, 240, 166, 0.42);
-        }
-        .promo-ledger {
-          padding: 16px 16px 12px;
-        }
-        .promo-line,
-        .profile-row {
-          min-height: 36px;
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 12px;
-          border-top: 1px solid rgba(112, 66, 30, 0.45);
-        }
-        .promo-line span,
-        .profile-row span {
-          color: #e0b39a;
-          font-size: 14px;
-          font-weight: 800;
-        }
-        .promo-line strong,
-        .profile-row strong {
-          color: #fff7dc;
-          font: 900 15px/1.1 "Arial Black", Arial, sans-serif;
-          text-align: right;
-          min-width: 0;
-          word-break: break-word;
-        }
-        .promo-line.strong strong {
-          color: #80ffd7;
-        }
-        .promo-ledger p {
-          margin-top: 10px;
-          color: #dca197;
-          font-size: 12px;
-          line-height: 1.35;
-        }
-        .profile-card {
-          padding: 16px;
-        }
-        .profile-head {
-          display: flex;
-          align-items: center;
-          gap: 14px;
-          margin-bottom: 14px;
-        }
-        .profile-avatar {
-          width: 66px;
-          height: 66px;
-          border-radius: 50%;
-          display: grid;
-          place-items: center;
-          color: #ffeb9a;
-          font: 900 32px/1 "Arial Black", Arial, sans-serif;
-          background: radial-gradient(circle at 35% 24%, #e65b6a 0, #9f1426 50%, #4a0612 100%);
-          border: 1px solid rgba(255, 229, 141, 0.75);
-        }
-        .profile-head h2 {
-          color: #fff7dc;
-          font: 900 24px/1.05 "Arial Black", Arial, sans-serif;
-          word-break: break-word;
-        }
-        .profile-head span {
-          width: max-content;
-          display: inline-block;
-          margin-top: 8px;
-          padding: 6px 9px;
-          border-radius: 7px;
-          color: #ffe58d;
-          background: #604000;
-          font: 900 11px/1 "Arial Black", Arial, sans-serif;
-          text-transform: uppercase;
-        }
-        .profile-stats,
-        .profile-actions {
-          margin-top: 2px;
-        }
-        .bottom-nav {
-          position: fixed;
-          left: 50%;
-          bottom: 0;
-          transform: translateX(-50%);
-          width: min(430px, 100vw);
-          padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
-          display: grid;
-          grid-template-columns: repeat(3, 1fr);
-          gap: 8px;
-          background: rgba(9, 7, 16, 0.98);
-          border-top: 1px solid rgba(244, 200, 74, 0.34);
-          box-shadow: 0 -12px 30px rgba(0, 0, 0, 0.35);
-        }
-        .bottom-nav button {
-          min-height: 44px;
-          border-radius: 10px;
-          color: #b69085;
-          background: transparent;
-          font-size: 12px;
-          font-weight: 900;
-        }
-        .bottom-nav span {
-          display: block;
-          margin-bottom: 3px;
-          font-size: 13px;
-        }
-        .bottom-nav .active {
-          color: #ffdf72;
-          background: rgba(36, 21, 9, 0.90);
-          border: 1px solid rgba(244, 200, 74, 0.58);
-        }
-        .modal-backdrop {
-          position: fixed;
-          inset: 0;
-          min-height: var(--app-height, 100dvh);
-          z-index: 28;
-          display: grid;
-          place-items: center;
-          padding: 18px;
-          pointer-events: auto;
-          background: rgba(0, 0, 0, 0.72);
-        }
-        .modal-card {
-          width: min(332px, calc(100vw - 36px));
-          border-radius: 14px;
-          padding: 22px 18px 18px;
-          text-align: center;
-          background: linear-gradient(180deg, #190d16, #090710);
-          border: 2px solid rgba(244, 200, 74, 0.58);
-          box-shadow: 0 24px 70px rgba(0, 0, 0, 0.48);
-        }
-        .modal-card h2 {
-          color: #ffdf72;
-          font: 900 20px/1.1 "Arial Black", Arial, sans-serif;
-        }
-        .modal-card p {
-          color: #ffc4aa;
-          font-size: 14px;
-          line-height: 1.35;
-          margin: 18px 0 14px;
-        }
-        .modal-card span {
-          display: block;
-          color: #8d6c61;
-          font: 900 12px/1 "Arial Black", Arial, sans-serif;
-          margin-bottom: 18px;
-        }
-        .wallet-modal {
-          display: grid;
-          gap: 12px;
-        }
-        .wallet-modal p {
-          margin: 0;
-        }
-        .wallet-modal label {
-          display: grid;
-          gap: 6px;
-          text-align: left;
-          color: #ffdf72;
-          font-size: 12px;
-          font-weight: 900;
-        }
-        .wallet-modal input,
-        .wallet-modal select {
-          width: 100%;
-          min-height: 42px;
-          border-radius: 10px;
-          border: 1px solid rgba(244, 200, 74, 0.38);
-          background: rgba(9, 7, 16, 0.95);
-          color: #fff7dc;
-          padding: 0 12px;
-          font: 800 14px/1 Arial, sans-serif;
-          outline: none;
-        }
-        .amount-grid {
+          gap: 16px;
+        }
+        .block-lobby-root .loading-card strong { font-size: 18px; }
+        .block-lobby-root .loading-card > span { color: var(--color-muted); font-size: 14px; }
+        .block-lobby-root .topbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+        .block-lobby-root .brand-lockup { display: flex; align-items: center; gap: 12px; min-width: 0; }
+        .block-lobby-root .brand-lockup > div:last-child { min-width: 0; }
+        .block-lobby-root .brand-mark {
+          width: 42px;
+          height: 42px;
           display: grid;
           grid-template-columns: repeat(2, 1fr);
-          gap: 8px;
+          grid-template-rows: repeat(2, 1fr);
+          gap: 4px;
+          flex: 0 0 auto;
+          transform: rotate(-5deg);
         }
-        .amount-grid button {
-          min-height: 42px;
-          color: #330009;
-          background: linear-gradient(180deg, #ffe58d, #d59d19);
+        .block-lobby-root .brand-mark i { border-radius: 5px; background: var(--color-primary); box-shadow: inset 0 2px 0 #ffffff38; }
+        .block-lobby-root .brand-mark i:first-child { grid-column: 2; background: var(--color-accent); }
+        .block-lobby-root .brand-lockup h1 { font-size: 18px; font-weight: 850; letter-spacing: .07em; }
+        .block-lobby-root .brand-lockup p { margin-top: 4px; color: var(--color-muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 280px; }
+        .block-lobby-root .top-actions { display: flex; gap: 8px; flex-shrink: 0; }
+        .block-lobby-root .icon-btn { width: 42px; height: 42px; border-radius: 13px; font-size: 23px; color: var(--color-muted); background: var(--color-panel); border: 1px solid var(--color-border); }
+        .block-lobby-root .lobby-content { display: flex; flex-direction: column; gap: 24px; }
+        .block-lobby-root .eyebrow { color: var(--color-accent); font-size: 10px; font-weight: 750; letter-spacing: .18em; }
+        .block-lobby-root :is(.lobby-intro, .page-heading) h2 { margin-top: 9px; font-size: clamp(25px, 3vw, 34px); font-weight: 750; line-height: 1.2; letter-spacing: -.04em; }
+        .block-lobby-root :is(.lobby-intro, .page-heading) p { margin-top: 9px; font-size: 14px; color: var(--color-muted); line-height: 1.5; }
+        .block-lobby-root .lobby-grid { display: grid; grid-template-columns: minmax(0, 1fr) 296px; gap: 20px; align-items: start; }
+        .block-lobby-root :is(.lobby-main, .lobby-sidebar) { min-width: 0; display: flex; flex-direction: column; gap: 18px; }
+        .block-lobby-root :is(.wallet-card, .rollover-card, .admin-entry, .game-card, .how-to-panel, .history-panel, .promo-ledger, .profile-card) { border: 1px solid var(--color-border); border-radius: 20px; background: var(--color-panel); }
+        .block-lobby-root .game-card { overflow: hidden; display: grid; grid-template-columns: .95fr 1.05fr; border-color: #a78bfa40; }
+        .block-lobby-root .game-art {
+          min-width: 0;
+          padding: 26px 16px;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          gap: 24px;
+          background: radial-gradient(ellipse at 50% 40%, #5140965c, transparent 70%), linear-gradient(145deg, #252041, #151b33);
         }
-        .pix-box {
-          padding: 12px;
-          border-radius: 10px;
-          background: rgba(23, 17, 29, 0.96);
-          border: 1px solid rgba(55, 217, 255, 0.30);
+        .block-lobby-root .art-label { color: #d3c7f4; font-size: 8px; font-weight: 700; letter-spacing: .13em; text-align: center; }
+        .block-lobby-root .block-board {
+          width: min(210px, 100%);
+          aspect-ratio: 1;
+          padding: 9px;
           display: grid;
-          gap: 8px;
+          grid-template-columns: repeat(8, 1fr);
+          gap: 4px;
+          background: #0d1225;
+          border: 1px solid #9da8f237;
+          border-radius: 14px;
+          transform: rotate(-5deg);
+          box-shadow: 9px 14px 0 #080c1b55, 0 18px 40px #090b1a44;
         }
-        .pix-box strong {
-          color: #80ffd7;
-          font: 900 18px/1 "Arial Black", Arial, sans-serif;
+        .block-lobby-root .block-cell { min-width: 0; aspect-ratio: 1; background: #20283f; border-radius: 3px; }
+        .block-lobby-root .block-cell.filled { box-shadow: inset 0 2px 0 #ffffff3d, inset 0 -2px 0 #00000026; }
+        .block-lobby-root .block-v { background: var(--color-primary); }
+        .block-lobby-root .block-c { background: var(--color-accent); }
+        .block-lobby-root .block-p { background: #f9a8d4; }
+        .block-lobby-root .art-caption { display: flex; align-items: center; gap: 7px; font-size: 7px; letter-spacing: .06em; color: #b0bad8; white-space: nowrap; }
+        .block-lobby-root .art-caption i { width: 3px; height: 3px; border-radius: 50%; background: var(--color-accent); }
+        .block-lobby-root .game-info { min-width: 0; padding: 30px 24px; display: flex; flex-direction: column; align-items: flex-start; gap: 15px; }
+        .block-lobby-root .badges { display: flex; flex-wrap: wrap; gap: 6px; }
+        .block-lobby-root .badges span { padding: 5px 7px; border-radius: 5px; font-size: 8px; font-weight: 800; letter-spacing: .06em; color: #d3c3ff; background: #a78bfa17; }
+        .block-lobby-root .badges span + span { background: #67e8f914; color: var(--color-accent); }
+        .block-lobby-root .game-info h2 { font-size: clamp(28px, 3vw, 38px); font-weight: 800; letter-spacing: -.05em; line-height: 1; }
+        .block-lobby-root .game-info p { color: var(--color-muted); font-size: 13px; line-height: 1.65; }
+        .block-lobby-root .play-btn { width: 100%; min-height: 49px; border-radius: 12px; margin-top: 8px; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px; color: #131128; background: var(--color-primary); font-size: 14px; font-weight: 800; box-shadow: 0 8px 24px #a78bfa1c; }
+        .block-lobby-root .play-btn span { font-size: 20px; line-height: 1; }
+        .block-lobby-root .demo-caption { color: var(--color-muted); font-size: 10px; line-height: 1.5; }
+        .block-lobby-root .how-to-panel { padding: 22px; }
+        .block-lobby-root .section-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+        .block-lobby-root :is(.section-title h3, .promo-ledger h3) { font-size: 14px; font-weight: 700; }
+        .block-lobby-root .section-title > span { color: var(--color-muted); font-size: 8px; letter-spacing: .1em; font-weight: 600; }
+        .block-lobby-root .how-to-grid { list-style: none; padding: 0; margin: 22px 0 0; display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+        .block-lobby-root .how-to-grid li { min-width: 0; }
+        .block-lobby-root .how-to-grid li > span { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; margin-bottom: 12px; color: var(--color-primary); background: #a78bfa14; font-size: 10px; font-weight: 700; }
+        .block-lobby-root .how-to-grid strong { font-size: 11px; }
+        .block-lobby-root .how-to-grid p { margin-top: 6px; font-size: 11px; line-height: 1.6; color: var(--color-muted); }
+        .block-lobby-root .wallet-card { padding: 20px; background: linear-gradient(130deg, #252340, var(--color-panel) 80%); }
+        .block-lobby-root .wallet-heading { display: flex; align-items: center; justify-content: space-between; color: var(--color-muted); font-size: 9px; letter-spacing: .12em; font-weight: 700; margin-bottom: 22px; }
+        .block-lobby-root .wallet-heading span + span { font-size: 18px; color: var(--color-primary); }
+        .block-lobby-root .balance-label { display: block; color: var(--color-muted); font-size: 12px; }
+        .block-lobby-root .wallet-card > strong { display: block; font-size: 31px; font-weight: 750; letter-spacing: -.04em; margin: 5px 0 20px; overflow-wrap: anywhere; }
+        .block-lobby-root .bonus-balance { color: var(--color-success); font-size: 12px; margin: -8px 0 16px; }
+        .block-lobby-root :is(.wallet-actions, .profile-actions) { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+        .block-lobby-root :is(.primary-btn, .dark-btn) { min-height: 43px; padding: 11px 12px; border-radius: 10px; font-size: 12px; font-weight: 750; }
+        .block-lobby-root .primary-btn { background: var(--color-primary); color: #131128; }
+        .block-lobby-root .dark-btn { background: var(--color-panel-raised); color: var(--color-text); border: 1px solid var(--color-border); }
+        .block-lobby-root .wallet-note { margin-top: 14px; color: var(--color-muted); font-size: 10px; line-height: 1.5; }
+        .block-lobby-root .rollover-card { padding: 16px 18px; display: grid; gap: 10px; }
+        .block-lobby-root :is(.rollover-card.complete span, .rollover-head span) { display: block; color: var(--color-muted); font-size: 9px; font-weight: 650; letter-spacing: .08em; }
+        .block-lobby-root .rollover-card.complete strong { display: block; margin-top: 7px; color: var(--color-success); font-size: 12px; font-weight: 600; }
+        .block-lobby-root .rollover-head { display: flex; justify-content: space-between; gap: 10px; align-items: center; }
+        .block-lobby-root .rollover-head strong { font-size: 12px; color: var(--color-accent); }
+        .block-lobby-root .rollover-progress { height: 6px; border-radius: 99px; overflow: hidden; background: var(--color-panel-raised); }
+        .block-lobby-root .rollover-progress i { display: block; height: 100%; border-radius: inherit; background: var(--color-primary); }
+        .block-lobby-root .rollover-lines { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px; color: var(--color-muted); font-size: 10px; line-height: 1.5; }
+        .block-lobby-root .rollover-lines strong { color: var(--color-text); font-weight: 500; }
+        .block-lobby-root .lobby-notice { padding: 14px 18px; border: 1px solid #a78bfa44; border-radius: 12px; color: var(--color-text); background: #a78bfa14; font-size: 13px; line-height: 1.5; }
+        .block-lobby-root .admin-entry { display: grid; gap: 6px; width: 100%; padding: 18px; text-align: left; color: var(--color-text); }
+        .block-lobby-root .admin-entry span { color: var(--color-accent); font-size: 9px; font-weight: 700; letter-spacing: .09em; }
+        .block-lobby-root .admin-entry strong { font-size: 15px; }
+        .block-lobby-root .admin-entry em { color: var(--color-muted); font-size: 11px; font-style: normal; line-height: 1.5; }
+        .block-lobby-root .history-panel { padding: 20px; }
+        .block-lobby-root .panel-description { margin-top: 8px; color: var(--color-muted); font-size: 11px; line-height: 1.6; }
+        .block-lobby-root .history-row { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 12px; padding: 12px 0; margin-top: 6px; border-top: 1px solid var(--color-border); font-size: 11px; }
+        .block-lobby-root .history-row :is(span, em) { color: var(--color-danger); font-style: normal; }
+        .block-lobby-root .history-row.won :is(span, em) { color: var(--color-success); }
+        .block-lobby-root .empty-state { display: grid; justify-items: center; gap: 8px; padding: 26px 0 8px; text-align: center; }
+        .block-lobby-root .empty-state > span { font-size: 28px; color: #617197; margin-bottom: 4px; }
+        .block-lobby-root .empty-state strong { font-size: 11px; font-weight: 600; }
+        .block-lobby-root .empty-state p { color: var(--color-muted); font-size: 10px; }
+        .block-lobby-root .wallet-page-grid { display: grid; grid-template-columns: 320px minmax(0, 1fr); gap: 20px; align-items: start; }
+        .block-lobby-root .promo-ledger { padding: 24px; }
+        .block-lobby-root .promo-ledger > p { margin: 12px 0 20px; color: var(--color-muted); font-size: 13px; line-height: 1.7; }
+        .block-lobby-root :is(.promo-line, .profile-row) { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 15px 0; border-top: 1px solid var(--color-border); font-size: 13px; }
+        .block-lobby-root :is(.promo-line, .profile-row) > span { color: var(--color-muted); }
+        .block-lobby-root :is(.promo-line, .profile-row) > strong { min-width: 0; text-align: right; font-weight: 600; overflow-wrap: anywhere; }
+        .block-lobby-root .rules-example { padding: 14px; border-radius: 12px; background: var(--color-panel-raised); font-size: 12px; }
+        .block-lobby-root .demo-note { padding: 16px; border: 1px solid #67e8f930; border-radius: 12px; background: #67e8f909; }
+        .block-lobby-root .demo-note strong { color: var(--color-accent); font-size: 12px; }
+        .block-lobby-root .demo-note p { margin-top: 6px; color: var(--color-muted); font-size: 12px; line-height: 1.6; }
+        .block-lobby-root .profile-card { padding: 24px; }
+        .block-lobby-root .profile-head { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; }
+        .block-lobby-root .profile-avatar { width: 60px; height: 60px; display: grid; place-items: center; flex-shrink: 0; border-radius: 18px; color: var(--color-primary); background: #a78bfa1c; border: 1px solid #a78bfa38; font-size: 24px; font-weight: 750; }
+        .block-lobby-root .profile-head > div:last-child { min-width: 0; }
+        .block-lobby-root .profile-head h2 { font-size: 23px; overflow-wrap: anywhere; }
+        .block-lobby-root .profile-head span { display: inline-block; margin-top: 5px; color: var(--color-muted); font-size: 12px; }
+        .block-lobby-root .stats-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+        .block-lobby-root .stats-grid article { padding: 20px; border: 1px solid var(--color-border); border-radius: 16px; background: var(--color-panel); }
+        .block-lobby-root .stats-grid span { display: block; color: var(--color-muted); font-size: 11px; line-height: 1.5; margin-bottom: 8px; }
+        .block-lobby-root .stats-grid strong { font-size: 24px; font-weight: 750; }
+        .block-lobby-root .bottom-nav { position: fixed; z-index: 20; bottom: 18px; left: 50%; transform: translateX(-50%); width: min(460px, calc(100% - 40px)); display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; padding: 7px; border: 1px solid var(--color-border); border-radius: 20px; background: #12172bf5; box-shadow: 0 16px 45px #0000004d; backdrop-filter: blur(16px); }
+        .block-lobby-root .bottom-nav button { min-height: 50px; display: flex; align-items: center; justify-content: center; gap: 10px; border-radius: 13px; color: var(--color-muted); background: transparent; font-size: 12px; font-weight: 650; }
+        .block-lobby-root .bottom-nav span { font-size: 22px; line-height: 1; }
+        .block-lobby-root .bottom-nav .active { color: var(--color-primary); background: #a78bfa18; }
+        .block-lobby-root .modal-backdrop { position: fixed; inset: 0; z-index: 28; display: grid; place-items: center; padding: 20px; background: #050714cc; backdrop-filter: blur(6px); }
+        .block-lobby-root .modal-card { width: min(420px, 100%); max-height: calc(var(--app-height, 100dvh) - 40px); overflow-y: auto; overscroll-behavior: contain; padding: 26px; border: 1px solid var(--color-border); border-radius: 22px; background: var(--color-panel); box-shadow: 0 28px 80px #00000066; outline: none; }
+        .block-lobby-root .wallet-modal { display: grid; gap: 16px; }
+        .block-lobby-root .wallet-modal h2 { font-size: 22px; letter-spacing: -.03em; }
+        .block-lobby-root .wallet-modal p { font-size: 12px; line-height: 1.6; color: var(--color-muted); }
+        .block-lobby-root .wallet-modal label { display: grid; gap: 8px; color: var(--color-text); font-size: 12px; font-weight: 550; }
+        .block-lobby-root .wallet-modal :is(input, select) { width: 100%; min-height: 45px; border: 1px solid var(--color-border); border-radius: 10px; padding: 10px 12px; color: var(--color-text); background: var(--color-bg); font-size: 16px; color-scheme: dark; }
+        .block-lobby-root .wallet-modal input::placeholder { color: var(--color-muted); opacity: .8; }
+        .block-lobby-root .amount-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+        .block-lobby-root .modal-card button { min-height: 44px; border-radius: 10px; padding: 10px 12px; font-size: 12px; font-weight: 750; background: var(--color-primary); color: #131128; }
+        .block-lobby-root .modal-card button[data-action="close-modal"] { background: var(--color-panel-raised); color: var(--color-muted); border: 1px solid var(--color-border); }
+        .block-lobby-root .pix-box { display: grid; gap: 12px; padding: 16px; border-radius: 12px; background: var(--color-bg); border: 1px solid #67e8f930; }
+        .block-lobby-root .pix-box strong { color: var(--color-accent); font-size: 22px; }
+        .block-lobby-root .pix-box span { font-size: 12px; color: var(--color-muted); line-height: 1.5; }
+        .block-lobby-root .pix-box code { max-height: 90px; overflow-y: auto; word-break: break-all; font-size: 11px; line-height: 1.7; color: var(--color-text); }
+        .block-lobby-root .wallet-message { color: var(--color-accent); font-size: 12px; line-height: 1.6; }
+        @media (hover: hover) {
+          .block-lobby-root button:not(:disabled):hover { filter: brightness(1.12); }
         }
-        .pix-box span {
-          margin: 0;
-          color: #ffdca0;
-          font: 800 12px/1.3 Arial, sans-serif;
+        @media (max-width: 960px) {
+          .block-lobby-root .lobby-grid { grid-template-columns: minmax(0, 1fr) 268px; gap: 16px; }
+          .block-lobby-root .game-card { grid-template-columns: 1fr; }
+          .block-lobby-root .game-art { gap: 18px; padding: 20px; }
+          .block-lobby-root .block-board { width: 178px; }
+          .block-lobby-root .game-info { padding: 24px; }
+          .block-lobby-root .game-info h2 { font-size: 34px; }
+          .block-lobby-root .how-to-grid { grid-template-columns: 1fr; }
+          .block-lobby-root .how-to-grid li { display: flex; align-items: flex-start; gap: 12px; }
+          .block-lobby-root .how-to-grid li > span { flex-shrink: 0; margin: 0; }
+          .block-lobby-root .how-to-grid p { margin-top: 3px; }
         }
-        .pix-box code {
-          display: block;
-          max-height: 70px;
-          overflow: auto;
-          color: #d7fbff;
-          font: 700 11px/1.35 Consolas, monospace;
-          word-break: break-all;
+        @media (max-width: 680px) {
+          .block-lobby-root .lobby-shell { padding: max(20px, env(safe-area-inset-top)) 18px calc(100px + env(safe-area-inset-bottom)); gap: 28px; }
+          .block-lobby-root .lobby-content { gap: 20px; }
+          .block-lobby-root .brand-lockup { gap: 10px; }
+          .block-lobby-root .brand-lockup h1 { font-size: 15px; letter-spacing: .05em; }
+          .block-lobby-root .brand-lockup p { max-width: 160px; }
+          .block-lobby-root .brand-mark { width: 36px; height: 36px; }
+          .block-lobby-root .icon-btn { width: 38px; height: 38px; }
+          .block-lobby-root .top-actions { gap: 6px; }
+          .block-lobby-root :is(.lobby-grid, .wallet-page-grid) { grid-template-columns: 1fr; }
+          .block-lobby-root .game-info { padding: 23px; gap: 13px; }
+          .block-lobby-root .game-art { padding: 20px 24px; gap: 17px; }
+          .block-lobby-root .block-board { width: 165px; gap: 3px; padding: 8px; }
+          .block-lobby-root .art-label { font-size: 8px; }
+          .block-lobby-root .demo-caption { width: 100%; text-align: center; font-size: 11px; }
+          .block-lobby-root .game-info h2 { font-size: 34px; }
+          .block-lobby-root .game-info p { font-size: 13px; }
+          .block-lobby-root .play-btn { margin-top: 4px; }
+          .block-lobby-root .wallet-card { padding: 22px; }
+          .block-lobby-root .wallet-heading { margin-bottom: 16px; }
+          .block-lobby-root .wallet-note { font-size: 11px; }
+          .block-lobby-root .bottom-nav { bottom: 0; width: 100%; padding: 8px 18px calc(8px + env(safe-area-inset-bottom)); border-radius: 0; border-width: 1px 0 0; }
+          .block-lobby-root .bottom-nav button { min-height: 48px; font-size: 11px; }
+          .block-lobby-root .profile-card { padding: 20px; }
+          .block-lobby-root .profile-row { font-size: 12px; gap: 12px; }
+          .block-lobby-root .stats-grid { gap: 8px; }
+          .block-lobby-root .stats-grid article { padding: 14px 11px; }
+          .block-lobby-root .stats-grid strong { font-size: 20px; }
+          .block-lobby-root .stats-grid span { font-size: 10px; min-height: 30px; }
+          .block-lobby-root .promo-ledger { padding: 20px; }
+          .block-lobby-root .promo-line { font-size: 12px; gap: 18px; }
+          .block-lobby-root .modal-card { padding: 22px; }
         }
-        .wallet-message {
-          margin: 0;
-          color: #80ffd7 !important;
-          line-height: 1.25 !important;
-        }
-        .modal-card button {
-          min-width: 130px;
-          color: #330009;
-          background: linear-gradient(180deg, #ffe58d, #d59d19);
-        }
-        .modal-card button:disabled {
-          color: #9ca3af;
-          background: #27212b;
-          cursor: not-allowed;
-          border: 1px solid rgba(156, 163, 175, 0.20);
-        }
-        @media (max-height: 720px) {
-          .lobby-shell {
-            gap: 9px;
-            padding-top: max(10px, env(safe-area-inset-top));
-          }
-          .wallet-card {
-            padding: 13px 14px 12px;
-          }
-          .wallet-card > strong {
-            font-size: 32px;
-            margin-bottom: 10px;
-          }
-          .promo-strip {
-            min-height: 64px;
-          }
-          .game-card {
-            grid-template-columns: 116px 1fr;
-          }
-          .game-art {
-            min-height: 118px;
-          }
-          .history-panel {
-            padding: 11px 12px;
-          }
-          .history-row {
-            min-height: 30px;
-          }
+        @media (max-width: 360px) {
+          .block-lobby-root .lobby-shell { padding-left: 14px; padding-right: 14px; }
+          .block-lobby-root .brand-lockup h1 { font-size: 13px; }
+          .block-lobby-root .brand-lockup p { max-width: 135px; font-size: 11px; }
+          .block-lobby-root .game-info { padding: 20px; }
+          .block-lobby-root .section-title > span { display: none; }
         }
       </style>
     `;
   }
 
   _money(value) {
-    return `R$ ${Number(value || 0).toFixed(2)}`;
+    return Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
   }
 
   _escape(value) {

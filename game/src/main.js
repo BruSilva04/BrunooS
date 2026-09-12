@@ -1,4 +1,6 @@
 import Phaser from 'phaser';
+import './brand.css';
+import { BRAND, BRAND_COLORS } from './brand.js';
 import { W, H } from './config.js';
 import BootScene from './scenes/BootScene.js';
 import AuthScene from './scenes/AuthScene.js';
@@ -9,13 +11,14 @@ import GameScene from './scenes/GameScene.js';
 import { clearSession, hasValidSession, initAcquisitionTracking, markSessionActivity } from './services/api.js';
 
 initAcquisitionTracking();
+document.title = BRAND.name;
 
 const game = new Phaser.Game({
   type: Phaser.AUTO,
   width: W,
   height: H,
   parent: 'game',
-  backgroundColor: '#000510',
+  backgroundColor: BRAND_COLORS.background,
   scene: [BootScene, AuthScene, LobbyScene, AdminDashboardScene, MenuScene, GameScene],
   resolution: Math.min(Math.max(window.devicePixelRatio || 1, 2), 3),
   antialias: true,
@@ -33,8 +36,8 @@ const game = new Phaser.Game({
 });
 
 function refreshScale() {
-  if (window.sereiaSyncViewport) {
-    window.sereiaSyncViewport();
+  if (window.syncAppViewport) {
+    window.syncAppViewport();
   }
   if (game?.scale) {
     game.scale.refresh();
@@ -50,12 +53,14 @@ if (window.visualViewport) {
 }
 
 function forceLoginWhenSessionExpires({ allowDuringGame = false } = {}) {
+  const authenticatedScenes = ['Game', 'Menu', 'Lobby', 'AdminDashboard'];
+  if (!authenticatedScenes.some((key) => game.scene.isActive(key))) return;
   if (game.scene.isActive('Auth')) return;
   if (game.scene.isActive('Game') && !allowDuringGame) return;
   if (hasValidSession()) return;
 
   clearSession();
-  ['Game', 'Menu', 'Lobby'].forEach((key) => {
+  authenticatedScenes.forEach((key) => {
     if (game.scene.isActive(key)) game.scene.stop(key);
   });
   game.scene.start('Auth');

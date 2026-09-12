@@ -6,6 +6,7 @@ const SESSION_STARTED_KEY = 'sereia_auth_started_at';
 const SESSION_LAST_SEEN_KEY = 'sereia_auth_last_seen_at';
 const ACQ_VISITOR_KEY = 'sereia_acq_visitor_id';
 const ACQ_ATTRIBUTION_KEY = 'sereia_acq_first_touch';
+// Keep existing storage keys so the visual rebrand preserves sessions and attribution.
 const SESSION_IDLE_MS = 30 * 60 * 1000;
 const SESSION_MAX_AGE_MS = 4 * 60 * 60 * 1000;
 
@@ -107,8 +108,8 @@ async function request(path, options = {}) {
       ...fetchOptions,
       headers,
     });
-  } catch (error) {
-    throw new Error(`Falha ao conectar com o backend em ${API_URL}`);
+  } catch {
+    throw new Error('Não foi possível conectar. Verifique sua conexão e tente novamente.');
   }
   const rawBody = await response.text();
   let data = {};
@@ -119,8 +120,19 @@ async function request(path, options = {}) {
   }
 
   if (!response.ok) {
-    const detail = data.detail || data.message || rawBody.slice(0, 120) || response.statusText;
-    throw new Error(`HTTP ${response.status} em ${API_URL}${path}: ${detail}`);
+    const detail = data.detail || data.message;
+    const message = response.status >= 500
+      ? 'Serviço temporariamente indisponível. Tente novamente em instantes.'
+      : typeof detail === 'string'
+        ? detail
+        : response.status === 422
+          ? 'Confira os dados preenchidos e tente novamente.'
+          : response.status === 401
+            ? 'Acesso não autorizado. Entre novamente com seus dados.'
+            : 'Não foi possível concluir a solicitação. Tente novamente.';
+    const error = new Error(message);
+    error.status = response.status;
+    throw error;
   }
   return data;
 }

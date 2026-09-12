@@ -1,12 +1,14 @@
 {
-  "name": "sereia-do-tesouro",
+  "name": "block-rush",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "test": "npm run test:block && npm run test:api",
     "test:block": "node tests/blockPuzzleLogic.test.mjs",
+    "test:api": "node tests/apiSession.test.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

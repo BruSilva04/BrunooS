@@ -1,4 +1,5 @@
 import Phaser from 'phaser';
+import { BRAND } from '../brand.js';
 import { H, W } from '../config.js';
 import {
   clearSession,
@@ -35,17 +36,17 @@ export default class AdminDashboardScene extends Phaser.Scene {
 
   _drawBackdrop() {
     const g = this.add.graphics();
-    g.fillGradientStyle(0x11050a, 0x11050a, 0x03040a, 0x03040a, 1);
+    g.fillGradientStyle(0x12172b, 0x12172b, 0x090b1a, 0x090b1a, 1);
     g.fillRect(0, 0, W, H);
-    g.fillStyle(0xf4c84a, 0.08);
+    g.fillStyle(0xa3aecb, 0.08);
     g.fillCircle(W - 50, 78, 110);
-    g.fillStyle(0x9f1426, 0.13);
+    g.fillStyle(0x7c3aed, 0.13);
     g.fillCircle(38, H - 80, 150);
   }
 
   _mount() {
     this.root = document.createElement('div');
-    this.root.className = 'sereia-admin-root';
+    this.root.className = 'block-admin-root';
     document.body.appendChild(this.root);
   }
 
@@ -76,7 +77,7 @@ export default class AdminDashboardScene extends Phaser.Scene {
       this.report = report || { overview: {}, rows: [] };
     } catch (error) {
       this.error = error.message || 'Falha ao carregar painel admin.';
-      if (String(this.error).includes('401')) {
+      if (error.status === 401) {
         clearSession();
         this.scene.start('Auth');
         return;
@@ -106,7 +107,7 @@ export default class AdminDashboardScene extends Phaser.Scene {
       <main class="admin-shell">
         <header class="admin-topbar">
           <div>
-            <span>PAINEL ADMIN</span>
+            <span>${BRAND.upperName} / ADMIN</span>
             <h1>Aquisicao</h1>
           </div>
           <div class="admin-actions">
@@ -428,7 +429,7 @@ export default class AdminDashboardScene extends Phaser.Scene {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'sereia-acquisition-campaigns.csv';
+    a.download = `${BRAND.slug}-acquisition-campaigns.csv`;
     a.click();
     URL.revokeObjectURL(url);
   }
@@ -440,7 +441,7 @@ export default class AdminDashboardScene extends Phaser.Scene {
 
   _campaignUtmExample(referralCode) {
     const code = String(referralCode || '').trim();
-    return `?ref=${encodeURIComponent(code)}&utm_source=instagram&utm_medium=story&utm_campaign=lancamento_sereia`;
+    return `?ref=${encodeURIComponent(code)}&utm_source=instagram&utm_medium=story&utm_campaign=lancamento_${BRAND.slug.replace(/-/g, '_')}`;
   }
 
   _money(value) {
@@ -468,17 +469,18 @@ export default class AdminDashboardScene extends Phaser.Scene {
   _style() {
     return `
       <style>
-        .sereia-admin-root {
+        .block-admin-root {
           position: fixed;
           inset: 0;
           z-index: 30;
           height: var(--app-height, 100dvh);
           overflow: auto;
           -webkit-overflow-scrolling: touch;
-          color: #fff7dc;
+          color: #f4f7ff;
           font-family: Arial, Helvetica, sans-serif;
           pointer-events: auto;
-          background: linear-gradient(180deg, rgba(13, 7, 16, 0.96), rgba(3, 4, 10, 0.98));
+          touch-action: pan-y;
+          background: linear-gradient(180deg, rgba(9, 11, 26, 0.98), rgba(9, 11, 26, 0.98));
         }
         .admin-shell {
           width: min(1180px, 100%);
@@ -498,8 +500,8 @@ export default class AdminDashboardScene extends Phaser.Scene {
         .admin-alert,
         .kpi-grid article {
           border-radius: 10px;
-          border: 1px solid rgba(244, 200, 74, 0.28);
-          background: rgba(20, 13, 23, 0.94);
+          border: 1px solid rgba(167, 139, 250, 0.28);
+          background: var(--color-panel);
           box-shadow: 0 12px 34px rgba(0, 0, 0, 0.30);
         }
         .admin-loading {
@@ -512,12 +514,12 @@ export default class AdminDashboardScene extends Phaser.Scene {
           display: block;
         }
         .admin-loading strong {
-          color: #ffdf72;
+          color: #a78bfa;
           font: 900 20px/1 "Arial Black", Arial, sans-serif;
           margin-bottom: 8px;
         }
         .admin-loading span {
-          color: #ffd0be;
+          color: #a3aecb;
           font-size: 14px;
         }
         .admin-topbar {
@@ -528,12 +530,12 @@ export default class AdminDashboardScene extends Phaser.Scene {
           padding-top: max(0px, env(safe-area-inset-top));
         }
         .admin-topbar span {
-          color: #f4c84a;
+          color: #a3aecb;
           font: 900 12px/1 "Arial Black", Arial, sans-serif;
         }
         .admin-topbar h1 {
           margin-top: 4px;
-          color: #fff7dc;
+          color: #f4f7ff;
           font: 900 28px/1 "Arial Black", Arial, sans-serif;
         }
         .admin-actions {
@@ -547,8 +549,8 @@ export default class AdminDashboardScene extends Phaser.Scene {
           border: 0;
           border-radius: 8px;
           padding: 0 12px;
-          color: #2a070c;
-          background: linear-gradient(180deg, #ffe58d, #d59d19);
+          color: #090b1a;
+          background: linear-gradient(180deg, #c4b5fd, #a78bfa);
           font: 900 12px/1 "Arial Black", Arial, sans-serif;
           cursor: pointer;
         }
@@ -573,7 +575,7 @@ export default class AdminDashboardScene extends Phaser.Scene {
         label {
           display: grid;
           gap: 6px;
-          color: #e0b39a;
+          color: #a3aecb;
           font-size: 11px;
           font-weight: 900;
           text-transform: uppercase;
@@ -584,9 +586,9 @@ export default class AdminDashboardScene extends Phaser.Scene {
           width: 100%;
           min-height: 40px;
           border-radius: 8px;
-          border: 1px solid rgba(244, 200, 74, 0.30);
-          background: rgba(6, 8, 17, 0.94);
-          color: #fff7dc;
+          border: 1px solid rgba(167, 139, 250, 0.30);
+          background: var(--color-bg);
+          color: #f4f7ff;
           padding: 0 10px;
           font: 800 13px/1 Arial, sans-serif;
           outline: none;
@@ -599,8 +601,8 @@ export default class AdminDashboardScene extends Phaser.Scene {
         input:focus,
         select:focus,
         textarea:focus {
-          border-color: #ffdf72;
-          box-shadow: 0 0 0 3px rgba(255, 223, 114, 0.12);
+          border-color: #a78bfa;
+          box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.12);
         }
         .kpi-grid {
           display: grid;
@@ -613,13 +615,13 @@ export default class AdminDashboardScene extends Phaser.Scene {
         }
         .kpi-grid span {
           display: block;
-          color: #dca197;
+          color: #a3aecb;
           font-size: 11px;
           font-weight: 900;
           margin-bottom: 10px;
         }
         .kpi-grid strong {
-          color: #ffdf72;
+          color: #a78bfa;
           font: 900 18px/1 "Arial Black", Arial, sans-serif;
           word-break: break-word;
         }
@@ -633,7 +635,7 @@ export default class AdminDashboardScene extends Phaser.Scene {
         }
         .admin-card h2,
         .table-head h2 {
-          color: #ffdf72;
+          color: #a78bfa;
           font: 900 17px/1 "Arial Black", Arial, sans-serif;
           margin-bottom: 12px;
         }
@@ -658,20 +660,20 @@ export default class AdminDashboardScene extends Phaser.Scene {
           margin-bottom: 10px;
         }
         .table-head span {
-          color: #dca197;
+          color: #a3aecb;
           font-size: 12px;
           font-weight: 900;
         }
         .table-scroll {
           overflow: auto;
           border-radius: 8px;
-          border: 1px solid rgba(244, 200, 74, 0.18);
+          border: 1px solid rgba(167, 139, 250, 0.18);
         }
         table {
           width: 100%;
           min-width: 1040px;
           border-collapse: collapse;
-          background: rgba(8, 8, 14, 0.86);
+          background: var(--color-bg);
         }
         th,
         td {
@@ -685,12 +687,12 @@ export default class AdminDashboardScene extends Phaser.Scene {
           position: sticky;
           top: 0;
           z-index: 1;
-          color: #ffdf72;
-          background: #170b12;
+          color: #a78bfa;
+          background: #1a2340;
           font: 900 11px/1 "Arial Black", Arial, sans-serif;
         }
         td {
-          color: #fff7dc;
+          color: #f4f7ff;
           font-weight: 800;
         }
         td strong,
@@ -699,7 +701,7 @@ export default class AdminDashboardScene extends Phaser.Scene {
         }
         td small {
           margin-top: 4px;
-          color: #dca197;
+          color: #a3aecb;
           font-size: 10px;
         }
         .link-btn {
@@ -716,7 +718,7 @@ export default class AdminDashboardScene extends Phaser.Scene {
         .empty {
           height: 64px;
           text-align: center;
-          color: #dca197;
+          color: #a3aecb;
         }
         @media (max-width: 860px) {
           .admin-shell {

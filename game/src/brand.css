@@ -1,0 +1,18 @@
+:root {
+  color-scheme: dark;
+  --color-bg: #090b1a;
+  --color-panel: #12172b;
+  --color-panel-raised: #1a2340;
+  --color-border: rgba(155, 171, 224, .18);
+  --color-text: #f4f7ff;
+  --color-muted: #a3aecb;
+  --color-primary: #a78bfa;
+  --color-accent: #67e8f9;
+  --color-danger: #fda4af;
+  --color-success: #86efac;
+}
+
+:where(button, a, input, select, textarea):focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 3px;
+}
