@@ -4,6 +4,7 @@ import time
 import uuid
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from services.auth import verify_session_token
+from services.account_mode import is_demo_user
 from services.casino import generate_crash_point, calculate_payout
 from services.provably_fair import generate_server_seed, hash_seed
 from db.database import adjust_user_balance, get_user_by_id, save_round, update_round
@@ -18,8 +19,7 @@ READY_TIMEOUT_SECONDS = 18.0
 
 
 def is_admin_demo(user: dict) -> bool:
-    permissions = user.get("permissions") or {}
-    return user.get("role") == "admin" or bool(permissions.get("admin"))
+    return is_demo_user(user)
 
 
 def wallet_reserve_error_message(exc: Exception) -> str:

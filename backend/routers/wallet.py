@@ -26,6 +26,7 @@ from db.database import (
 )
 from services import amplopay
 from services.auth import verify_session_token
+from services.account_mode import is_demo_user
 
 router = APIRouter(prefix="/api/wallet", tags=["wallet"])
 
@@ -88,6 +89,14 @@ def is_admin(user: dict) -> bool:
 
 def payment_provider() -> str:
     return os.getenv("PAYMENT_PROVIDER", "sandbox").strip().lower() or "sandbox"
+
+
+def account_payment_provider(user: dict) -> str:
+    if is_demo_user(user):
+        return "sandbox"
+    if payment_provider() != "amplopay":
+        raise HTTPException(503, "Pagamentos reais estão temporariamente indisponíveis.")
+    return "amplopay"
 
 
 def require_amplopay_webhook_token() -> bool:
@@ -256,7 +265,7 @@ async def deposit_intent(
     authorization: str | None = Header(default=None),
 ):
     user = await current_user(authorization)
-    provider = payment_provider()
+    provider = account_payment_provider(user)
     if provider not in {"sandbox", "amplopay"}:
         raise HTTPException(status_code=501, detail=f"Provider {provider} nao suportado")
 
@@ -321,12 +330,14 @@ async def sandbox_confirm_deposit(
     authorization: str | None = Header(default=None),
 ):
     user = await current_user(authorization)
+    if not is_demo_user(user):
+        raise HTTPException(403, "Confirmação de teste é exclusiva da conta demo do administrador.")
     intent = await get_payment_intent(intent_id)
     if not intent:
         raise HTTPException(status_code=404, detail="Deposito nao encontrado")
     if intent.get("provider") != "sandbox":
         raise HTTPException(status_code=400, detail="Confirmacao manual permitida apenas em sandbox")
-    if intent.get("user_id") != user["id"] and not is_admin(user):
+    if str(intent.get("user_id")) != str(user["id"]):
         raise HTTPException(status_code=403, detail="Sem permissao para confirmar este deposito")
 
     updated = await confirm_payment_intent(intent_id, user["id"])
@@ -342,13 +353,14 @@ async def withdrawal_request(
     authorization: str | None = Header(default=None),
 ):
     user = await current_user(authorization)
-    provider = payment_provider()
+    provider = account_payment_provider(user)
     if provider not in {"sandbox", "amplopay"}:
         raise HTTPException(status_code=501, detail=f"Provider {provider} nao suportado")
 
     if provider == "amplopay":
         if not payload.owner_name or not payload.owner_document:
             raise HTTPException(status_code=422, detail="Nome e documento do titular sao obrigatorios para saque Amplopay")
+        transfer_callback = callback_url("/api/wallet/webhooks/amplopay/transfer")
 
     ok, result = await create_withdrawal_request(
         user["id"],
@@ -380,7 +392,7 @@ async def withdrawal_request(
                 owner_document=payload.owner_document or "",
                 owner_document_type=payload.owner_document_type or "cpf",
                 ip=request_ip,
-                callback_url=callback_url("/api/wallet/webhooks/amplopay/transfer"),
+                callback_url=transfer_callback,
             )
         except amplopay.AmploPayError as exc:
             await adjust_user_balance(

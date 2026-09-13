@@ -15,6 +15,7 @@ from db.database import (
     rollover_status,
 )
 from services.auth import create_session_token, hash_password, verify_password, verify_session_token
+from services.account_mode import is_demo_user
 
 router = APIRouter(prefix="/api", tags=["auth"])
 RATE_LIMIT_BUCKETS: dict[str, list[float]] = {}
@@ -88,6 +89,7 @@ def public_user(user: dict) -> dict:
         "document_type": user.get("document_type") or "cpf",
         "has_kyc": bool(user.get("legal_name") and user.get("document")),
         "role": user.get("role", "player"),
+        "demo_mode": is_demo_user(user),
         "permissions": user.get("permissions", {}),
         "referral_code": user.get("referral_code") or "",
         "acquisition_campaign_id": user.get("acquisition_campaign_id"),

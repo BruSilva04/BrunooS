@@ -11,6 +11,7 @@ import anyio
 from dotenv import load_dotenv
 from supabase import Client, create_client
 from services.auth import hash_password
+from services.account_mode import is_demo_user
 from services.tracking import (
     date_in_range,
     normalize_referral_code,
@@ -1509,6 +1510,7 @@ async def get_lobby_snapshot(user_id: str) -> dict[str, Any] | None:
             "document_type": user.get("document_type") or "cpf",
             "has_kyc": bool(user.get("legal_name") and user.get("document")),
             "role": user.get("role", "player"),
+            "demo_mode": is_demo_user(user),
             "permissions": user.get("permissions", {}),
             "referral_code": user.get("referral_code") or "",
             "acquisition_campaign_id": user.get("acquisition_campaign_id"),
@@ -1516,6 +1518,10 @@ async def get_lobby_snapshot(user_id: str) -> dict[str, Any] | None:
         "balance": float(user.get("balance", 0) or 0),
         "bonus_balance": float(user.get("bonus_balance", 0) or 0),
         "rollover": rollover_status(user),
+        "demo_mode": is_demo_user(user),
+        "active_block_round": next(({
+            "round_id": item["round_id"], "bet": item["bet"],
+        } for item in rounds if item.get("game_type") == "block" and item.get("status") == "active"), None),
         "stats": {
             "rounds": len(played_rounds),
             "maxMult": round(max_mult, 2),

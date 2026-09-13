@@ -51,6 +51,8 @@ export default class LobbyScene extends Phaser.Scene {
       this.snapshot = snapshot;
       this.user = this.snapshot.user;
       state.balance = Number(this.snapshot.balance || 0);
+      state.demoMode = this.snapshot.demo_mode === true;
+      state.activeBlockRound = this.snapshot.active_block_round || null;
       state.history = (this.snapshot.history || []).map((round) => Number(round.mult || 1)).slice(0, 5);
       this.modal = null;
       this._render();
@@ -176,11 +178,11 @@ export default class LobbyScene extends Phaser.Scene {
               <span class="art-caption">8 × 8 <i></i> INFINITAS POSSIBILIDADES</span>
             </div>
             <div class="game-info">
-              <div class="badges"><span>PUZZLE DE BLOCOS</span><span>DEMO</span></div>
+              <div class="badges"><span>PUZZLE DE BLOCOS</span><span>${state.demoMode ? 'DEMO ADMIN' : 'SALDO REAL'}</span></div>
               <h2>${this._escape(BRAND.name)}</h2>
               <p>Encaixe as peças, complete linhas e colunas e encontre a sua melhor sequência.</p>
-              <button class="play-btn" type="button" data-action="play">Jogar demo <span aria-hidden="true">↗</span></button>
-              <span class="demo-caption">Sem depósito. A demo não altera seu saldo.</span>
+              <button class="play-btn" type="button" data-action="play">${state.activeBlockRound ? 'Retomar rodada' : state.demoMode ? 'Jogar demo' : 'Jogar'} <span aria-hidden="true">↗</span></button>
+              <span class="demo-caption">${state.demoMode ? 'Demonstração exclusiva da conta administradora.' : state.activeBlockRound ? 'Sua rodada está salva. Retome sem uma nova aposta.' : 'A aposta usa o saldo disponível da sua conta.'}</span>
             </div>
           </section>
           <section class="how-to-panel" aria-labelledby="how-to-title">
@@ -198,8 +200,8 @@ export default class LobbyScene extends Phaser.Scene {
           ${this._adminEntryHtml()}
           <section class="history-panel">
             <div class="section-title"><h3>Registros da conta</h3></div>
-            <p class="panel-description">Histórico registrado. Partidas demo não aparecem aqui.</p>
-            ${history.length ? history.slice(0, 5).map((round) => this._historyRowHtml(round)).join('') : '<div class="empty-state"><span aria-hidden="true">▤</span><strong>Nenhuma rodada registrada</strong><p>Você já pode experimentar a demo.</p></div>'}
+            <p class="panel-description">${state.demoMode ? 'Partidas demo não movimentam o histórico financeiro.' : 'Apostas e resgates registrados na sua conta.'}</p>
+            ${history.length ? history.slice(0, 5).map((round) => this._historyRowHtml(round)).join('') : '<div class="empty-state"><span aria-hidden="true">▤</span><strong>Nenhuma rodada registrada</strong><p>Suas rodadas aparecerão aqui.</p></div>'}
           </section>
         </aside>
       </div>
@@ -224,7 +226,7 @@ export default class LobbyScene extends Phaser.Scene {
     const bonusBalance = Number(this.snapshot?.bonus_balance || 0);
     return `
       <section class="wallet-card">
-        <div class="wallet-heading"><span>MINHA CARTEIRA</span><span aria-hidden="true">▤</span></div>
+        <div class="wallet-heading"><span>${state.demoMode ? 'CARTEIRA DEMO' : 'MINHA CARTEIRA'}</span><span aria-hidden="true">▤</span></div>
         <span class="balance-label">Saldo disponível</span>
         <strong>${this._money(state.balance)}</strong>
         ${bonusBalance > 0 ? `<p class="bonus-balance">Bônus ativo: ${this._money(bonusBalance)}</p>` : ''}
@@ -232,7 +234,7 @@ export default class LobbyScene extends Phaser.Scene {
           <button class="primary-btn" type="button" data-action="deposit">Depositar</button>
           <button class="dark-btn" type="button" data-action="withdraw">Sacar Pix</button>
         </div>
-        <p class="wallet-note">A demo não movimenta esta carteira.</p>
+        <p class="wallet-note">${state.demoMode ? 'Saldo de demonstração. Não representa dinheiro real.' : 'Saldo real da sua conta.'}</p>
       </section>
     `;
   }
@@ -256,7 +258,7 @@ export default class LobbyScene extends Phaser.Scene {
           ${this._promoLineHtml('Depósitos a partir de R$ 100', '100% de bônus')}
           ${this._promoLineHtml('Movimentação exigida para saque', '2× o crédito total')}
           <p class="rules-example">Exemplo: um depósito de R$ 100 gera R$ 200 de crédito total e exige R$ 400 de movimentação.</p>
-          <div class="demo-note"><strong>Sobre a demo</strong><p>As partidas de ${this._escape(BRAND.name)} são simuladas: não geram créditos, débitos nem progresso de rollover.</p></div>
+          <div class="demo-note"><strong>${state.demoMode ? 'Conta demo' : 'Partidas com saldo real'}</strong><p>${state.demoMode ? 'Somente a conta administradora joga em demonstração, sem apostas reais.' : 'A aposta é debitada ao iniciar a rodada. Resgates confirmados retornam para sua carteira; apostas contam para o rollover.'}</p></div>
         </section>
       </div>
     `;
@@ -339,7 +341,8 @@ export default class LobbyScene extends Phaser.Scene {
 
   _modalHtml(type) {
     const isDeposit = type === 'deposit';
-    const title = isDeposit ? 'Depositar via Pix' : 'Sacar via Pix';
+    const title = state.demoMode ? (isDeposit ? 'Depósito de demonstração' : 'Saque de demonstração')
+      : isDeposit ? 'Depositar via Pix' : 'Sacar via Pix';
     const message = this.walletMessage
       ? `<span class="wallet-message" role="status">${this._escape(this.walletMessage)}</span>`
       : '';
@@ -354,7 +357,7 @@ export default class LobbyScene extends Phaser.Scene {
         <div class="modal-backdrop" data-action="close-modal">
           <section class="modal-card wallet-modal" data-modal="${type}" tabindex="-1" role="dialog" aria-modal="true" aria-label="${title}">
             <h2>${title}</h2>
-            <p>Escolha um valor para gerar um Pix. O saldo entra somente após a confirmação do pagamento. A demo não exige depósito.</p>
+            <p>${state.demoMode ? 'Simule um depósito na sua carteira demo. Nenhum pagamento real será gerado.' : 'Escolha um valor para gerar um Pix. O saldo entra somente após a confirmação do pagamento.'}</p>
             ${needsCustomer ? `
               <label>
                 Nome completo
@@ -374,7 +377,7 @@ export default class LobbyScene extends Phaser.Scene {
                 <span>${this._depositPreviewText(deposit.amount)}</span>
                 <code>${this._escape(deposit.pix_copy_paste || '')}</code>
               </div>
-              ${this.currentDeposit?.sandbox ? `<button type="button" data-action="deposit-confirm" data-intent-id="${this._escape(deposit.id)}" ${this.walletBusy ? 'disabled' : ''}>Simular Pix pago</button>` : ''}
+              ${state.demoMode && this.currentDeposit?.sandbox ? `<button type="button" data-action="deposit-confirm" data-intent-id="${this._escape(deposit.id)}" ${this.walletBusy ? 'disabled' : ''}>Simular Pix pago</button>` : ''}
             ` : ''}
             ${message}
             <button type="button" data-action="close-modal" ${this.walletBusy ? 'disabled' : ''}>Fechar</button>
@@ -387,7 +390,7 @@ export default class LobbyScene extends Phaser.Scene {
       <div class="modal-backdrop" data-action="close-modal">
         <section class="modal-card wallet-modal" data-modal="${type}" tabindex="-1" role="dialog" aria-modal="true" aria-label="${title}">
           <h2>${title}</h2>
-          <p>${canWithdraw ? 'Solicite o saque para uma chave Pix. O valor fica reservado na carteira.' : `Movimente mais ${this._money(rollover.remaining || 0)} antes de sacar.`}</p>
+          <p>${state.demoMode ? 'Operação de demonstração, sem transferência de dinheiro real.' : canWithdraw ? 'Solicite o saque para uma chave Pix. O valor fica reservado na carteira.' : `Movimente mais ${this._money(rollover.remaining || 0)} antes de sacar.`}</p>
           ${!canWithdraw ? this._rolloverHtml(true) : ''}
           <label>
             Valor
@@ -500,7 +503,7 @@ export default class LobbyScene extends Phaser.Scene {
           <span>${this._money(rollover.progress || 0)} / ${this._money(rollover.required || 0)}</span>
           <strong>Falta ${this._money(rollover.remaining || 0)}</strong>
         </div>
-        <p class="panel-description">A demo não conta para o rollover.</p>
+        <p class="panel-description">${state.demoMode ? 'A demo não conta para o rollover.' : 'As apostas confirmadas contam para o rollover.'}</p>
       </section>
     `;
   }

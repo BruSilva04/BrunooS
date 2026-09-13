@@ -8,6 +8,7 @@ import {
   centsToMoney,
 } from '../config.js';
 import SoundManager from '../utils/SoundManager.js';
+import { startBlockRound, fetchBlockRound, placeBlockPiece, cashoutBlockRound } from '../services/api.js';
 import {
   canPlacePiece,
   createEmptyBoard,
@@ -23,7 +24,7 @@ const TUTORIAL_KEY = 'sereia_block_tutorial_seen';
 const GAME_STATE = {
   STARTING: 'STARTING',
   PLAYING: 'PLAYING',
-  ANIMATING_CLEAR: 'ANIMATING_CLEAR',
+  MOVE_PENDING: 'MOVE_PENDING',
   CASHOUT_AVAILABLE: 'CASHOUT_AVAILABLE',
   CASHOUT_PENDING: 'CASHOUT_PENDING',
   CASHED_OUT: 'CASHED_OUT',
@@ -73,6 +74,15 @@ export default class GameScene extends Phaser.Scene {
   init(data = {}) {
     const minBet = centsToMoney(BLOCK_GAME_CONFIG.minimumBetCents);
     this.bet = Math.max(minBet, Number(data.bet || minBet));
+    this.demoMode = state.demoMode === true;
+    this.startRequestId = crypto.randomUUID();
+    this.roundId = null;
+    this.roundVersion = 0;
+    this.pendingAction = null;
+    this.inFlight = false;
+    this.lifecycle = {};
+    this.errorOverlay = null;
+    this.settledPayout = 0;
     this.board = createEmptyBoard();
     this.availablePieces = [];
     this.pieceViews = [];
@@ -101,11 +111,7 @@ export default class GameScene extends Phaser.Scene {
     this._createPieceLayer();
     this._createCashoutButton();
     this._installInput();
-    this._startDemoRound();
-
-    if (!this._tutorialSeen()) {
-      this._showTutorial();
-    }
+    this._startRound();
 
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this._cleanup());
   }
@@ -179,24 +185,24 @@ export default class GameScene extends Phaser.Scene {
       fontFamily: '"Arial Black", Arial, sans-serif',
       color: '#a3aecb',
     });
-    this.add.text(28, 40, money(state.balance), {
+    this.balanceText = this.add.text(28, 40, money(state.balance), {
       fontSize: '17px',
       fontFamily: '"Arial Black", Arial, sans-serif',
       color: '#f4f7ff',
     });
 
-    this.add.text(W - 28, 24, 'VALOR SIMULADO', {
+    this.betCaption = this.add.text(W - 28, 24, '', {
       fontSize: '10px',
       fontFamily: '"Arial Black", Arial, sans-serif',
       color: '#a3aecb',
     }).setOrigin(1, 0);
-    this.add.text(W - 28, 40, money(this.bet), {
+    this.betText = this.add.text(W - 28, 40, money(this.bet), {
       fontSize: '17px',
       fontFamily: '"Arial Black", Arial, sans-serif',
       color: '#f4f7ff',
     }).setOrigin(1, 0);
 
-    this.add.text(W / 2, 26, 'VALOR DEMO', {
+    this.valueCaption = this.add.text(W / 2, 26, '', {
       fontSize: '10px',
       fontFamily: '"Arial Black", Arial, sans-serif',
       color: '#67e8f9',
@@ -215,7 +221,7 @@ export default class GameScene extends Phaser.Scene {
       color: '#e0e7ff',
     }).setOrigin(0.5, 0);
 
-    this.modeText = this.add.text(W / 2, 106, 'DEMO · sem movimentação de saldo real', {
+    this.modeText = this.add.text(W / 2, 106, 'Carregando rodada…', {
       fontSize: '10px',
       fontFamily: 'Arial, sans-serif',
       color: '#a3aecb',
@@ -295,6 +301,133 @@ export default class GameScene extends Phaser.Scene {
     this.input.on('gameout', () => this._endDrag(null));
   }
 
+  async _startRound() {
+    if (this.inFlight) return;
+    this.inFlight = true;
+    const lifecycle = this.lifecycle;
+    this.gameState = GAME_STATE.STARTING;
+    this._updateModeLabels();
+    this._drawCashoutButton();
+    try {
+      const response = await startBlockRound(this.bet, this.startRequestId);
+      if (this.lifecycle !== lifecycle) return;
+      this.demoMode = response.demo_mode === true;
+      state.demoMode = this.demoMode;
+      state.balance = Number(response.balance);
+      this.bet = Number(response.bet);
+      if (this.demoMode) {
+        state.activeBlockRound = null;
+        this._startDemoRound();
+      } else {
+        this._acceptRound(response);
+      }
+      this._updateModeLabels();
+      if (!this.resultShown && !this._tutorialSeen()) this._showTutorial();
+    } catch (error) {
+      if (this.lifecycle !== lifecycle) return;
+      this._showRoundError(error.message, () => this._startRound());
+    } finally {
+      if (this.lifecycle === lifecycle) this.inFlight = false;
+    }
+  }
+
+  _updateModeLabels() {
+    this.betCaption?.setText(this.demoMode ? 'VALOR SIMULADO' : 'APOSTA');
+    this.valueCaption?.setText(this.demoMode ? 'VALOR DEMO' : 'RESGATE');
+    this.betText?.setText(money(this.bet));
+    this.balanceText?.setText(money(state.balance));
+    this.modeText?.setText(this.gameState === GAME_STATE.STARTING ? 'Carregando rodada…'
+      : this.demoMode ? 'DEMO ADMIN · sem movimentação de saldo real' : 'SALDO REAL · rodada salva automaticamente');
+  }
+
+  _acceptRound(response) {
+    if (!response.round_id || response.demo_mode !== false) throw new Error('Resposta inválida da rodada.');
+    this.roundId = response.round_id;
+    this.roundVersion = response.version;
+    this.bet = response.bet;
+    this.board = response.board;
+    this.availablePieces = response.pieces;
+    this.moves = response.moves;
+    this.totalClears = response.total_clears;
+    this.bestCombo = response.best_combo;
+    this.difficultyTier = response.difficulty_tier;
+    this.cashoutUnlocked = response.cashout_unlocked;
+    this.settledPayout = response.payout;
+    state.balance = response.balance;
+    state.activeBlockRound = response.status === 'active' ? { round_id: this.roundId, bet: this.bet } : null;
+    this.pendingAction = null;
+    this.gameState = response.status === 'won' ? GAME_STATE.CASHED_OUT
+      : response.status === 'lost' ? GAME_STATE.GAME_OVER
+        : this.cashoutUnlocked ? GAME_STATE.CASHOUT_AVAILABLE : GAME_STATE.PLAYING;
+    this._drawBlocks();
+    this._renderPieces();
+    this._updateHud();
+    this._updateModeLabels();
+    this._drawCashoutButton();
+    if (response.status === 'won') {
+      this.sounds.playCashout();
+      this._showResult(true);
+    } else if (response.status === 'lost') {
+      this.sounds.playGameOver();
+      this._showResult(false);
+    }
+  }
+
+  async _sendPendingAction() {
+    if (this.inFlight || !this.pendingAction) return;
+    const lifecycle = this.lifecycle;
+    const action = this.pendingAction;
+    this.inFlight = true;
+    this.gameState = action.kind === 'move' ? GAME_STATE.MOVE_PENDING : GAME_STATE.CASHOUT_PENDING;
+    this._drawCashoutButton();
+    try {
+      const send = action.kind === 'move' ? placeBlockPiece : cashoutBlockRound;
+      const response = await send(this.roundId, action.payload);
+      if (this.lifecycle !== lifecycle) return;
+      this._acceptRound(response);
+    } catch (error) {
+      if (this.lifecycle !== lifecycle) return;
+      this._showRoundError(error.message, error.status === 409 || error.status === 422
+        ? () => this._syncRound() : () => this._sendPendingAction());
+    } finally {
+      if (this.lifecycle === lifecycle) this.inFlight = false;
+    }
+  }
+
+  async _syncRound() {
+    const lifecycle = this.lifecycle;
+    try {
+      const response = await fetchBlockRound(this.roundId);
+      if (this.lifecycle === lifecycle) this._acceptRound(response);
+    } catch (error) {
+      if (this.lifecycle === lifecycle) this._showRoundError(error.message, () => this._syncRound());
+    }
+  }
+
+  _showRoundError(message, retry) {
+    this.gameState = GAME_STATE.ERROR;
+    this._clearDrag();
+    this.errorOverlay?.destroy(true);
+    const overlay = this.add.container(0, 0).setDepth(110);
+    const py = Math.max(110, H / 2 - 145);
+    const dim = this.add.rectangle(0, 0, W, H, 0x000000, 0.8).setOrigin(0).setInteractive();
+    const panel = this.add.rectangle(W / 2, py + 145, W - 40, 290, THEME.panelRaised);
+    const title = this.add.text(W / 2, py + 34, 'RODADA PAUSADA', {
+      fontSize: '19px', fontFamily: 'Arial, sans-serif', color: '#f4f7ff', fontStyle: 'bold',
+    }).setOrigin(0.5);
+    const body = this.add.text(W / 2, py + 108, message, {
+      fontSize: '14px', fontFamily: 'Arial, sans-serif', color: '#a3aecb',
+      wordWrap: { width: W - 82 }, align: 'center', lineSpacing: 5,
+    }).setOrigin(0.5);
+    const retryButton = this._makePanelButton(W / 2, py + 200, W - 80, 45, 'TENTAR NOVAMENTE', true, () => {
+      overlay.destroy(true); this.errorOverlay = null; retry();
+    });
+    const lobby = this._makePanelButton(W / 2, py + 250, W - 80, 38, 'VOLTAR AO LOBBY', false, () => this.scene.start('Lobby'));
+    overlay.add([dim, panel, title, body, retryButton, lobby]);
+    this.errorOverlay = overlay;
+    this._drawCashoutButton();
+  }
+
   _startDemoRound() {
     this.board = createEmptyBoard();
     this.totalClears = 0;
@@ -329,6 +462,7 @@ export default class GameScene extends Phaser.Scene {
 
     const slotWidth = W / BLOCK_GAME_CONFIG.piecesPerBatch;
     this.availablePieces.forEach((piece, index) => {
+      if (piece.used) return;
       const homeX = Math.round(slotWidth * (index + 0.5));
       const homeY = this.pieceY + 14;
       const container = this.add.container(homeX, homeY).setDepth(22);
@@ -353,7 +487,7 @@ export default class GameScene extends Phaser.Scene {
         homeY,
       };
       zone.on('pointerdown', (pointer) => this._startDrag(pointer, index));
-      this.pieceViews.push(view);
+      this.pieceViews[index] = view;
     });
   }
 
@@ -468,35 +602,34 @@ export default class GameScene extends Phaser.Scene {
   }
 
   _placePiece(piece, row, col, view) {
+    if (!this._canPlayInput()) return;
     const placement = resolvePlacement(this.board, piece, row, col);
     if (!placement.ok) return;
-
+    if (!this.demoMode) {
+      this.pendingAction = { kind: 'move', payload: {
+        action_id: crypto.randomUUID(), version: this.roundVersion, piece_id: piece.id, row, col,
+      } };
+    }
     piece.used = true;
     this.moves += 1;
     this.bestCombo = Math.max(this.bestCombo, placement.clearCount);
     this.totalClears += placement.clearCount;
-    this.board = placement.placedBoard;
+    // Commit the visual clear immediately. Effects never lock the board.
+    this.board = placement.board;
     view.container.destroy(true);
     view.container = null;
     this.sounds.playPlacePiece();
     this._haptic(10);
     this._drawBlocks();
     this._updateHud();
-
     if (placement.clearCount > 0) {
-      this.gameState = GAME_STATE.ANIMATING_CLEAR;
       this.sounds.playClearLine();
-      this._haptic(placement.clearCount >= 2 ? [20, 30, 20] : 18);
-      this._animateClear(placement.rows, placement.columns, () => {
-        this.board = placement.board;
-        this.gameState = this.cashoutUnlocked ? GAME_STATE.CASHOUT_AVAILABLE : GAME_STATE.PLAYING;
-        this._drawBlocks();
-        this._afterMove(placement.clearCount);
-      });
-      return;
+      this._haptic(18);
+      this._animateClear(placement.rows, placement.columns);
+      this._showToast(placement.clearCount >= 2 ? `${placement.clearCount} LINHAS!` : 'BOA!');
     }
-
-    this._afterMove(0);
+    if (this.demoMode) this._afterMove(placement.clearCount);
+    else this._sendPendingAction();
   }
 
   _afterMove(clearCount) {
@@ -510,11 +643,6 @@ export default class GameScene extends Phaser.Scene {
       this.gameState = GAME_STATE.CASHOUT_AVAILABLE;
     } else {
       this.gameState = GAME_STATE.PLAYING;
-    }
-
-    if (clearCount > 0 && !this.resultShown) {
-      const label = clearCount >= 2 ? `${clearCount} LINHAS!` : 'BOA!';
-      this._showToast(label);
     }
 
     if (this.availablePieces.every((piece) => piece.used)) {
@@ -531,32 +659,19 @@ export default class GameScene extends Phaser.Scene {
     this._drawCashoutButton();
   }
 
-  _animateClear(rows, columns, onComplete) {
+  _animateClear(rows, columns) {
     const cells = uniqueCells(rows, columns, BLOCK_GAME_CONFIG.boardSize);
-    if (!cells.length) {
-      onComplete();
-      return;
-    }
-
-    let remaining = cells.length;
-    cells.forEach(([row, col], index) => {
+    if (!cells.length) return;
+    const flashes = cells.map(([row, col]) => {
       const { cx, cy } = this._cellRect(row, col);
-      const flash = this.add.rectangle(cx, cy, this.cellSize, this.cellSize, THEME.primary, 0.74)
-        .setDepth(19);
+      const flash = this.add.rectangle(cx, cy, this.cellSize, this.cellSize, THEME.primary, 0.74).setDepth(19);
       this.clearLayer.add(flash);
-      this.tweens.add({
-        targets: flash,
-        scale: 1.22,
-        alpha: 0,
-        delay: index * 8,
-        duration: BLOCK_GAME_CONFIG.clearAnimationMs,
-        ease: 'Cubic.easeOut',
-        onComplete: () => {
-          flash.destroy();
-          remaining -= 1;
-          if (remaining === 0) onComplete();
-        },
-      });
+      return flash;
+    });
+    this.tweens.add({
+      targets: flashes, scale: 1.12, alpha: 0,
+      duration: BLOCK_GAME_CONFIG.clearAnimationMs, ease: 'Cubic.easeOut',
+      onComplete: () => flashes.forEach((flash) => flash.destroy()),
     });
   }
 
@@ -594,7 +709,7 @@ export default class GameScene extends Phaser.Scene {
     const value = BLOCK_GAME_CONFIG.baseValueMultiplier
       + this.totalClears * BLOCK_GAME_CONFIG.clearValueStep
       + this.moves * BLOCK_GAME_CONFIG.moveValueStep;
-    return Math.min(BLOCK_GAME_CONFIG.maxDemoMultiplier, Number(value.toFixed(2)));
+    return Math.min(BLOCK_GAME_CONFIG.maxMultiplier, Math.round(Math.round(value * 1000) / 10) / 100);
   }
 
   _currentValue() {
@@ -605,13 +720,13 @@ export default class GameScene extends Phaser.Scene {
     if (!this.valueText || !this.progressText) return;
     const progress = Math.min(this.totalClears, BLOCK_GAME_CONFIG.clearsToUnlockCashout);
     this.valueText.setText(money(this._currentValue()));
-    this.progressText.setText(`RESGATE ${progress}/${BLOCK_GAME_CONFIG.clearsToUnlockCashout}  |  TIER ${this.difficultyTier}  |  ${this.moves} JOGADAS`);
+    this.progressText.setText(`RESGATE ${progress}/${BLOCK_GAME_CONFIG.clearsToUnlockCashout}  |  NÍVEL ${this.difficultyTier}  |  ${this.moves} JOGADAS`);
   }
 
   _drawCashoutButton() {
     if (!this.cashoutGfx) return;
     const unlocked = this.cashoutUnlocked;
-    const pending = this.gameState === GAME_STATE.CASHOUT_PENDING;
+    const pending = [GAME_STATE.STARTING, GAME_STATE.MOVE_PENDING, GAME_STATE.CASHOUT_PENDING, GAME_STATE.ERROR].includes(this.gameState);
     const done = this.resultShown || this.gameState === GAME_STATE.GAME_OVER;
     const x = 20;
     const y = this.cashoutY - 29;
@@ -626,7 +741,7 @@ export default class GameScene extends Phaser.Scene {
       this.cashoutGfx.strokeRoundedRect(x, y, width, height, 10);
       this.cashoutLabel.setText(`RESGATAR ${money(this._currentValue())}`);
       this.cashoutLabel.setColor('#090b1a');
-      this.cashoutSub.setText('modo demo');
+      this.cashoutSub.setText(this.demoMode ? 'modo demo admin' : 'crédito no saldo após confirmação');
       return;
     }
 
@@ -637,7 +752,7 @@ export default class GameScene extends Phaser.Scene {
 
     if (pending) {
       this.cashoutLabel.setText('CONFIRMANDO...');
-      this.cashoutSub.setText('resgate demo em andamento');
+      this.cashoutSub.setText(this.gameState === GAME_STATE.ERROR ? 'aguardando reconexão' : 'aguarde a confirmação da rodada');
     } else if (done) {
       this.cashoutLabel.setText('RODADA FINALIZADA');
       this.cashoutSub.setText('veja o resultado');
@@ -650,23 +765,23 @@ export default class GameScene extends Phaser.Scene {
   }
 
   _cashOut() {
-    if (this.resultShown || this.gameState === GAME_STATE.CASHOUT_PENDING) return;
+    if (this.resultShown || !this._canPlayInput()) return;
     if (!this.cashoutUnlocked) {
       this.sounds.playInvalidPlace();
-      this._haptic(12);
       this._showToast('COMPLETE 3 LINHAS OU COLUNAS');
       return;
     }
-
     this._clearDrag();
-    this.gameState = GAME_STATE.CASHOUT_PENDING;
-    this._drawCashoutButton();
-    this.sounds.playCashout();
-    this._haptic([18, 30, 18]);
-    this.time.delayedCall(420, () => {
+    if (this.demoMode) {
       this.gameState = GAME_STATE.CASHED_OUT;
+      this.sounds.playCashout();
       this._showResult(true);
-    });
+      return;
+    }
+    this.pendingAction = { kind: 'cashout', payload: {
+      action_id: crypto.randomUUID(), version: this.roundVersion,
+    } };
+    this._sendPendingAction();
   }
 
   _gameOver() {
@@ -706,7 +821,7 @@ export default class GameScene extends Phaser.Scene {
       strokeThickness: 5,
     }).setOrigin(0.5);
 
-    const value = this.add.text(W / 2, py + 92, won ? money(this._currentValue()) : money(0), {
+    const value = this.add.text(W / 2, py + 92, won ? money(this.demoMode ? this._currentValue() : this.settledPayout) : money(0), {
       fontSize: '34px',
       fontFamily: '"Arial Black", Arial, sans-serif',
       color: won ? '#67e8f9' : '#f4f7ff',
@@ -727,7 +842,9 @@ export default class GameScene extends Phaser.Scene {
       lineSpacing: 7,
     }).setOrigin(0.5);
 
-    const note = this.add.text(W / 2, py + 218, 'Modo demo: nenhum saldo real foi debitado ou creditado.', {
+    const note = this.add.text(W / 2, py + 218, this.demoMode
+      ? 'Modo demo admin: nenhum saldo real foi debitado ou creditado.'
+      : won ? `Resgate creditado. Saldo: ${money(state.balance)}` : `Aposta encerrada sem resgate. Saldo: ${money(state.balance)}`, {
       fontSize: '12px',
       fontFamily: 'Arial, sans-serif',
       color: '#a3aecb',
@@ -794,7 +911,7 @@ export default class GameScene extends Phaser.Scene {
     const body = this.add.text(W / 2, py + 142, [
       'Arraste as pecas para o tabuleiro.',
       'Complete linhas ou colunas para limpar.',
-      'Com 3 limpezas, o resgate demo libera.',
+      this.demoMode ? 'Com 3 limpezas, o resgate demo libera.' : 'Com 3 limpezas, você pode resgatar.',
       'Se nenhuma peca couber, a rodada termina.',
     ].join('\n'), {
       fontSize: '14px',
@@ -826,23 +943,24 @@ export default class GameScene extends Phaser.Scene {
   _showToast(message) {
     if (this.toast) this.toast.destroy();
     const y = Math.max(118, this.boardY - 28);
-    this.toast = this.add.text(W / 2, y, message, {
+    const toast = this.add.text(W / 2, y, message, {
       fontSize: '13px',
       fontFamily: '"Arial Black", Arial, sans-serif',
       color: '#090b1a',
       backgroundColor: '#a78bfa',
       padding: { x: 12, y: 8 },
     }).setOrigin(0.5).setDepth(70);
+    this.toast = toast;
     this.tweens.add({
-      targets: this.toast,
+      targets: toast,
       y: y - 16,
       alpha: 0,
       delay: 760,
       duration: 260,
       ease: 'Sine.easeOut',
       onComplete: () => {
-        if (this.toast) this.toast.destroy();
-        this.toast = null;
+        toast.destroy();
+        if (this.toast === toast) this.toast = null;
       },
     });
   }
@@ -867,6 +985,7 @@ export default class GameScene extends Phaser.Scene {
   }
 
   _cleanup() {
+    this.lifecycle = null;
     this._clearDrag();
     this.pieceViews.forEach((view) => {
       if (view?.container) view.container.destroy(true);

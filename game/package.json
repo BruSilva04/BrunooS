@@ -6,15 +6,18 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "test": "npm run test:block && npm run test:api",
+    "test": "npm run test:block && npm run test:api && npm run test:ledger && npm run test:flow",
     "test:block": "node tests/blockPuzzleLogic.test.mjs",
     "test:api": "node tests/apiSession.test.mjs",
+    "test:ledger": "node tests/blockLedger.test.mjs",
+    "test:flow": "node --experimental-vm-modules tests/blockGameFlow.test.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
     "phaser": "^3.60.0"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.3.7",
     "vite": "^5.0.0"
   }
 }

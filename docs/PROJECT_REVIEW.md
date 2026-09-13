@@ -1,35 +1,33 @@
 Revisão do projeto — Block Rush — 12/09/2026
 
-O frontend ativo usa Vite e Phaser, com entrada em [game/index.html:79](../game/index.html#L79) e cenas registradas em [game/src/main.js:22](../game/src/main.js#L22): carregamento, autenticação, lobby, administração, seleção de valor e jogo. A identidade atual está centralizada em [game/src/brand.js](../game/src/brand.js) e [game/src/brand.css](../game/src/brand.css).
+O frontend ativo usa Vite e Phaser, com login/cadastro, lobby, carteira, administração, seleção de aposta e puzzle de blocos. A identidade está centralizada em [brand.js](../game/src/brand.js) e [brand.css](../game/src/brand.css).
 
-O jogo atual é um puzzle demo de tabuleiro 8×8, três peças por lote e resgate visual após três limpezas. [GameScene.js:106](../game/src/scenes/GameScene.js#L106) inicia a rodada local; [config.js:32](../game/src/config.js#L32) define as regras. Essa cena não abre o WebSocket financeiro nem debita ou credita saldo real. Seus resultados também não são persistidos no histórico financeiro da conta.
+A conta configurada em `ADMIN_USERNAME`, desde que tenha papel ou permissão de administrador, é a única conta demo. Outras contas, inclusive outros administradores, usam saldo real. A autorização é calculada pelo backend e não aceita uma escolha de modo enviada pelo navegador. O cadastro de jogadores continua começando com saldo zero.
 
-O backend FastAPI mantém autenticação, carteira, Pix, aquisição de usuários e relatórios em Supabase. O endpoint [backend/routers/game.py:103](../backend/routers/game.py#L103) continua implementando o modelo anterior de crash/cashout, com reserva e liquidação de saldo. A existência desse endpoint não representa integração financeira do puzzle. Carteira e histórico continuam sendo funções da plataforma; a demo não cumpre rollover.
+O puzzle usa tabuleiro 8×8, três peças por lote e libera resgate após três linhas ou colunas completas. A limpeza do tabuleiro é imediata, acompanhada por um único efeito de 110 ms, sem atraso por célula. Em contas reais, cada jogada é confirmada pelo servidor antes da próxima entrada.
 
-[sereia-GDD.md](../sereia-GDD.md), [sereia-do-tesouro.html](../sereia-do-tesouro.html), [write_files.py](../write_files.py), [game/src/runner](../game/src/runner) e os objetos da sereia são referências ou implementações legadas, fora da entrada ativa do Vite. O gerador `write_files.py` contém gravações de cenas antigas e não deve ser usado para regenerar a interface atual.
+[block.py](../backend/routers/block.py) valida autenticação, peças, posições, versão da rodada e resgates. [block_puzzle.py](../backend/services/block_puzzle.py) calcula o progresso e o pagamento em centavos, preservando a progressão do puzzle existente. As peças são sorteadas no servidor; este trabalho não implementa verificação pública desse sorteio nem valida o retorno econômico do puzzle. O motor de crash em [game.py](../backend/routers/game.py) é uma implementação anterior, com regras diferentes.
 
-As chaves `sereia_*` de sessão, atribuição e preferência de som foram preservadas em [api.js:3](../game/src/services/api.js#L3) e [SoundManager.js:4](../game/src/utils/SoundManager.js#L4). Também permanecem os identificadores internos de produto/provedor em [amplopay.py:79](../backend/services/amplopay.py#L79) e o email administrativo padrão em [database.py:115](../backend/db/database.py#L115). Renomeá-los exige avaliar dados existentes e integrações; o nome visível do produto Pix já acompanha Block Rush.
+A [migração de partidas](../backend/db/migrations/20260912_block_rounds.sql) reúne aposta, histórico, ledger e rollover na mesma transação. O resgate também é liquidado junto da conclusão da rodada. Há uma rodada ativa por conta; atualizar a página ou abrir outra aba retoma essa rodada. Identificadores de ação e versões evitam duplicidade e alterações concorrentes incompatíveis. Falhas de persistência pausam a partida, sem recorrer ao modo demo ou a gravações financeiras separadas.
 
-Verificações executadas nesta revisão:
+Depósitos e saques sandbox são exclusivos da conta demo. Jogadores comuns exigem Amplopay configurado e não podem confirmar depósitos de teste. A conta demo não solicita transferências reais ao provedor. A URL de callback de saque é validada antes da reserva do valor.
 
-| Verificação | Resultado |
-| --- | --- |
-| `python3 backend/tests/test_casino.py` | Passou: simulação de 10.000 rodadas do motor anterior. |
-| `cd game && npm test` | Passou: regras do puzzle, mensagens de erro/status da API e preservação das sessões e atribuição. |
-| `cd game && npm run build` | Passou. Permanece o aviso de bundle acima de 500 kB, principalmente pelo Phaser. |
-| Chrome com API simulada | 25 verificações da aplicação passaram em 390×844, 320×740 e 1440×1000, sem exceções JavaScript. Login/cadastro e lobby tiveram ainda 18 verificações isoladas cada. |
-| `python3 backend/tests/test_tracking.py` | Passou: normalização, token de atribuição e métricas. |
-| Análise sintática Python | Os 21 arquivos do backend foram analisados sem erros. |
-| `python3 backend/tests/test_wallet_rules.py` | A execução completa parou na importação por ausência de `anyio` no Python local. |
-| Regras puras de carteira | As três funções de teste existentes passaram com as funções de bônus/rollover extraídas por AST, sem carregar dependências de banco. Isso não valida importação ou integração com Supabase. |
+Validação local desta alteração:
 
-Achados preexistentes para uma revisão financeira posterior. São observações do código local; privilégios, variáveis de ambiente, dados e comportamento dos serviços em produção não foram consultados ou testados:
+- Testes de regras do puzzle e da API JavaScript, preservando as sessões existentes.
+- Testes da cena com respostas de rede controladas: quebra antes da resposta HTTP, resgate somente após confirmação, repetição da mesma ação e descarte de respostas de uma cena encerrada.
+- Migração executada duas vezes sobre PostgreSQL local via PGlite, com saldos existentes preservados. Testes de aposta, resgate, perda, concorrência por versão, repetição, propriedade da rodada, rollover, permissões e reversão integral diante de falhas de gravação.
+- 18 testes Python das regras e endpoints com banco e pagamentos simulados.
+- Testes existentes de carteira, aquisição e motor de crash. A simulação de crash não mede o retorno do puzzle.
+- Build de produção. Permanece o aviso de bundle acima de 500 kB, principalmente pelo Phaser.
+- Chrome com APIs simuladas: 24 verificações de login, lobby, carteira e demo em telas de celular e desktop; outras 11 verificações do fluxo de jogador real, incluindo quebra antes da resposta, falha de resgate, repetição e saldo confirmado. Os cliques do segundo roteiro foram enviados como eventos DOM ao canvas devido a uma falha no encaminhamento de cliques pelo Chrome remoto. Nenhum dos roteiros registrou exceções JavaScript.
 
-1. **Permissões da RPC de carteira.** [schema.sql:361](../backend/db/schema.sql#L361) declara `adjust_wallet_balance` como `SECURITY DEFINER`, e [schema.sql:485](../backend/db/schema.sql#L485) concede execução a `service_role`, sem revogar explicitamente `PUBLIC`, `anon` ou `authenticated`. O script, isoladamente, não assegura execução exclusiva pelo backend. A exposição efetiva depende dos privilégios/defaults do banco instalado. Conferir esses privilégios e explicitar a restrição na migração.
-2. **Reaplicação do schema altera saldos.** [schema.sql:497](../backend/db/schema.sql#L497) recalcula o saldo de todos os usuários não administrativos pela soma do ledger, usando zero quando não há registros. A instrução roda sempre que o arquivo é aplicado. Separar essa reconciliação da criação de schema e avaliar a integridade do histórico antes de executá-la sobre dados existentes.
-3. **Fallback financeiro sem transação conjunta.** [database.py:619](../backend/db/database.py#L619) define `REQUIRE_WALLET_LEDGER=false` por padrão. Quando a RPC falha, [database.py:703](../backend/db/database.py#L703) permite ler/atualizar saldo e registrar o ledger separadamente. A análise indica possibilidade de inconsistência sob concorrência ou falha parcial; não houve reprodução contra banco real. Verificar a configuração instalada e preferir a RPC transacional com falha explícita.
-4. **Reserva de saque e tratamento de falhas.** [database.py:954](../backend/db/database.py#L954) reserva saldo antes de inserir a solicitação em [database.py:985](../backend/db/database.py#L985). Depois, [wallet.py:383](../backend/routers/wallet.py#L383) resolve a URL do callback, mas o fluxo de restituição captura apenas `AmploPayError` em [wallet.py:385](../backend/routers/wallet.py#L385). Falhas de configuração, inserção ou transporte em [amplopay.py:30](../backend/services/amplopay.py#L30) podem deixar uma reserva sem conclusão. Validar configuração antes da reserva e projetar reconciliação idempotente; um timeout não confirma se o provedor efetuou a transferência.
+A aplicação da migração em produção e a integração com pagamentos reais são etapas externas aos testes locais. Siga [as instruções de atualização](../backend/db/migrations/README.md). Não houve criação de depósitos, saques ou apostas em contas reais para testar estas alterações.
 
-A expiração de sessão agora também encerra `AdminDashboard`, junto das demais cenas autenticadas, em [game/src/main.js:61](../game/src/main.js#L61). Os achados financeiros acima foram documentados sem alterar regras financeiras ou executar migrações, depósitos, saques ou chamadas a serviços externos nesta revisão.
+Pontos preexistentes que continuam exigindo atenção na operação da carteira:
 
-O controle de sessão também aguarda uma cena autenticada ficar ativa antes de redirecionar, evitando disputar a inicialização com `Boot`. Falhas temporárias ao carregar o lobby mantêm a sessão e permitem tentar novamente; uma resposta 401 exige novo acesso.
+1. O arquivo completo [schema.sql](../backend/db/schema.sql) contém uma reconciliação que recalcula saldos não administrativos. Para esta atualização, execute somente a migração incremental. Ela também revoga a execução pública da RPC de saldo, mantendo o acesso pelo backend com `service_role`.
+2. Fluxos antigos de carteira permitem gravações separadas quando `REQUIRE_WALLET_LEDGER=false`. Configure `true` em produção. O novo puzzle exige transações independentemente dessa variável.
+3. Reserva de saque, criação da solicitação e comunicação com o provedor ainda não formam uma única operação transacional. A configuração do callback é validada antes da reserva, mas falhas de inserção ou transporte ainda exigem reconciliação operacional; um timeout não confirma o resultado de uma transferência.
+
+[sereia-GDD.md](../sereia-GDD.md), [sereia-do-tesouro.html](../sereia-do-tesouro.html), [write_files.py](../write_files.py), [game/src/runner](../game/src/runner) e os objetos da sereia são referências ou implementações legadas, fora da entrada ativa do Vite. Não use o gerador antigo para recriar as cenas atuais. As chaves `sereia_*` de sessão, atribuição, tutorial e som foram preservadas para manter os dados locais existentes.

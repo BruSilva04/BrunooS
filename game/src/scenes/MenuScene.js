@@ -8,13 +8,14 @@ export default class MenuScene extends Phaser.Scene {
   }
 
   create() {
-    this.bet = BETS[0];
+    this.demoMode = state.demoMode === true;
+    this.bet = state.activeBlockRound?.bet || BETS[0];
     this.betButtons = [];
     this.launchLocked = false;
     this._drawBackground();
     this._drawHeader();
     this._drawHero();
-    this._drawDemoPanel();
+    this._drawBetPanel();
     this._drawPlayButton();
     this.add.text(W / 2, H - 26, '18+ · Jogue com responsabilidade', {
       fontFamily: 'Arial, sans-serif', fontSize: '11px', color: '#a3aecb',
@@ -66,7 +67,7 @@ export default class MenuScene extends Phaser.Scene {
     }).setOrigin(0.5);
   }
 
-  _drawDemoPanel() {
+  _drawBetPanel() {
     const x = 22;
     const y = 291;
     const width = W - 44;
@@ -75,13 +76,13 @@ export default class MenuScene extends Phaser.Scene {
     g.fillRoundedRect(x, y, width, 196, 16);
     g.lineStyle(1, COLORS.primary, 0.22);
     g.strokeRoundedRect(x, y, width, 196, 16);
-    this.add.text(x + 20, y + 21, 'VALOR SIMULADO', {
+    this.add.text(x + 20, y + 21, this.demoMode ? 'VALOR SIMULADO' : 'APOSTA', {
       fontSize: '11px', fontFamily: 'Arial, sans-serif', fontStyle: 'bold', color: '#a3aecb',
     });
     this.betText = this.add.text(x + 20, y + 43, this._money(this.bet), {
       fontSize: '29px', fontFamily: 'Arial, sans-serif', fontStyle: 'bold', color: '#f4f7ff',
     });
-    this.add.text(x + width - 20, y + 23, 'DEMO', {
+    this.add.text(x + width - 20, y + 23, this.demoMode ? 'DEMO' : 'REAL', {
       fontSize: '10px', fontFamily: 'Arial, sans-serif', fontStyle: 'bold',
       color: '#67e8f9', backgroundColor: '#1a2340', padding: { x: 9, y: 6 },
     }).setOrigin(1, 0);
@@ -94,14 +95,16 @@ export default class MenuScene extends Phaser.Scene {
       }).setOrigin(0.5);
       const hit = this.add.zone(bx + 28, by + 20, 56, 42).setInteractive({ useHandCursor: true });
       hit.on('pointerdown', () => {
+        if (state.activeBlockRound) return;
         this.bet = value;
         this.betText.setText(this._money(value));
         this._refreshChips();
+        this._refreshPlayLabel();
       });
       this.betButtons.push({ value, bg, label, x: bx, y: by });
     });
     this._refreshChips();
-    this.add.text(W / 2, y + 163, 'Valores fictícios. Seu saldo permanece igual.', {
+    this.add.text(W / 2, y + 163, this.demoMode ? 'Valores fictícios. Seu saldo permanece igual.' : state.activeBlockRound ? 'Rodada em andamento. Nenhuma nova aposta será cobrada.' : 'A aposta será debitada do saldo ao iniciar.', {
       fontSize: '11px', fontFamily: 'Arial, sans-serif', color: '#a3aecb',
       align: 'center', wordWrap: { width: width - 32 },
     }).setOrigin(0.5);
@@ -120,17 +123,22 @@ export default class MenuScene extends Phaser.Scene {
   }
 
   _drawPlayButton() {
-    this._button(W / 2, 534, W - 44, 56, 'JOGAR DEMO  ›', true, () => {
+    this.playLabel = this._button(W / 2, 534, W - 44, 56, '', true, () => {
       if (this.launchLocked) return;
+      if (!this.demoMode && !state.activeBlockRound && state.balance < this.bet) {
+        this.scene.start('Lobby', { tab: 'promo', notice: 'Saldo insuficiente para a aposta selecionada.' });
+        return;
+      }
       this.launchLocked = true;
       document.activeElement?.blur?.();
       window.syncAppViewport?.();
       this.scale.refresh();
       this.scene.start('Game', { bet: this.bet });
     });
+    this._refreshPlayLabel();
     this.add.text(W / 2, 593, [
       'Arraste as peças e complete linhas ou colunas.',
-      'Não é necessário depositar para experimentar.',
+      this.demoMode ? 'Demonstração exclusiva da sua conta admin.' : 'Complete 3 linhas ou colunas para liberar o resgate.',
     ], {
       fontSize: '12px', fontFamily: 'Arial, sans-serif', color: '#a3aecb',
       align: 'center', lineSpacing: 7,
@@ -149,6 +157,14 @@ export default class MenuScene extends Phaser.Scene {
     hit.on('pointerover', () => label.setAlpha(0.75));
     hit.on('pointerout', () => label.setAlpha(1));
     hit.on('pointerdown', handler);
+    return label;
+  }
+
+  _refreshPlayLabel() {
+    if (!this.playLabel) return;
+    this.playLabel.setText(state.activeBlockRound ? 'RETOMAR RODADA  ›'
+      : this.demoMode ? 'JOGAR DEMO  ›'
+        : state.balance >= this.bet ? 'JOGAR  ›' : 'ADICIONAR SALDO  ›');
   }
 
   _money(value) {

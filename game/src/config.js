@@ -37,10 +37,10 @@ export const BLOCK_GAME_CONFIG = {
   baseValueMultiplier: 1,
   clearValueStep: 0.32,
   moveValueStep: 0.025,
-  maxDemoMultiplier: 8,
+  maxMultiplier: 8,
   dragOffsetMin: 54,
   dragOffsetMax: 76,
-  clearAnimationMs: 280,
+  clearAnimationMs: 110,
   difficulty: {
     easyUntil: 3,
     mediumUntil: 6,
@@ -141,6 +141,8 @@ export const WS_URL = normalizeEnvUrl(
 // Global Wallet & iGaming History State
 export const state = {
   balance: 0.00,
+  demoMode: false,
+  activeBlockRound: null,
   history: []
 };
 

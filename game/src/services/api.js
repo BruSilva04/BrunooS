@@ -283,6 +283,28 @@ export function fetchLobby() {
   return request('/api/lobby/me');
 }
 
+export function startBlockRound(bet, requestId) {
+  return request('/api/block/rounds', {
+    method: 'POST', body: JSON.stringify({ bet, request_id: requestId }),
+  });
+}
+
+export function fetchBlockRound(roundId) {
+  return request(`/api/block/rounds/${encodeURIComponent(roundId)}`);
+}
+
+export function placeBlockPiece(roundId, action) {
+  return request(`/api/block/rounds/${encodeURIComponent(roundId)}/moves`, {
+    method: 'POST', body: JSON.stringify(action),
+  });
+}
+
+export function cashoutBlockRound(roundId, action) {
+  return request(`/api/block/rounds/${encodeURIComponent(roundId)}/cashout`, {
+    method: 'POST', body: JSON.stringify(action),
+  });
+}
+
 export function fetchWallet() {
   return request('/api/wallet/me');
 }
