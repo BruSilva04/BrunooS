@@ -10,7 +10,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from routers import block, wallet
 from services.account_mode import is_demo_user
-from services.block_puzzle import apply_move, new_state, payout_cents, multiplier_hundredths
+from services.block_puzzle import apply_move, new_state, payout_cents, multiplier_hundredths, generate_batch, has_move, difficulty
 
 
 def piece(key="piece", coords=None, used=False):
@@ -53,6 +53,47 @@ class PuzzleRules(unittest.TestCase):
         result, status = apply_move(state, "piece", 0, 0)
         self.assertEqual(len(result["pieces"]), 3)
         self.assertFalse(any(item["used"] for item in result["pieces"]))
+
+    def test_difficulty_increases_with_each_completed_batch(self):
+        self.assertEqual(new_state()['difficulty_tier'], 2)
+        self.assertEqual([difficulty(0, moves) for moves in (0, 2, 3, 6, 300)], [2, 2, 3, 4, 4])
+        self.assertEqual([difficulty(clears, 0) for clears in (0, 3, 6, 90)], [2, 3, 4, 4])
+
+    def test_each_new_batch_contains_a_blocked_shape_when_possible(self):
+        board = [[0 if row == 0 else (row + col) % 2 for col in range(8)] for row in range(8)]
+        before = deepcopy(board)
+        for trial in range(100):
+            batch = generate_batch(board, 4, randbelow=lambda size: trial * size // 100)
+            self.assertEqual(len(batch), 3)
+            self.assertEqual(len({item['key'] for item in batch}), 3)
+            self.assertTrue(any(not has_move(board, [item]) for item in batch))
+            self.assertTrue(all(len(item['coords']) >= 3 for item in batch))
+        self.assertEqual(board, before)
+
+    def test_unplayable_new_batch_ends_round_without_rescue(self):
+        state = new_state()
+        state['board'] = [[(row + col) % 2 for col in range(8)] for row in range(8)]
+        state.update(pieces=[piece()], moves=2)
+        result, status = apply_move(state, 'piece', 0, 0)
+        self.assertEqual(result['difficulty_tier'], 3)
+        self.assertEqual(len(result['pieces']), 3)
+        self.assertFalse(has_move(result['board'], result['pieces']))
+        self.assertEqual(status, 'lost')
+
+    def test_clearing_a_line_can_unlock_a_previously_blocked_piece(self):
+        state = new_state()
+        state['board'] = [[(row + col) % 2 for col in range(8)] for row in range(8)]
+        state['board'][2] = [1, 1, 1, 1, 1, 0, 0, 0]
+        state['board'][1][4] = state['board'][3][4] = 0
+        state['board'][1][5] = state['board'][1][7] = 1
+        horizontal = piece('h3', [[0, 0], [0, 1], [0, 2]])
+        vertical = piece('v3', [[0, 0], [1, 0], [2, 0]])
+        state['pieces'] = [horizontal, vertical]
+        self.assertFalse(has_move(state['board'], [vertical]))
+        result, status = apply_move(state, 'h3', 2, 5)
+        self.assertEqual(result['total_clears'], 1)
+        self.assertTrue(has_move(result['board'], result['pieces']))
+        self.assertEqual(status, 'active')
 
     def test_integer_money_rounding_and_cap(self):
         self.assertEqual(multiplier_hundredths({"total_clears": 0, "moves": 1}), 103)

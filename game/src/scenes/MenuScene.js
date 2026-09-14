@@ -138,6 +138,7 @@ export default class MenuScene extends Phaser.Scene {
     this._refreshPlayLabel();
     this.add.text(W / 2, 593, [
       'Arraste as peças e complete linhas ou colunas.',
+      'Novas sequências podem trazer peças sem encaixe.',
       this.demoMode ? 'Demonstração exclusiva da sua conta admin.' : 'Complete 3 linhas ou colunas para liberar o resgate.',
     ], {
       fontSize: '12px', fontFamily: 'Arial, sans-serif', color: '#a3aecb',

@@ -30,6 +30,9 @@ export const PIECE_DEFS = [
   { key: 'plus', label: 'PLUS', tier: 4, coords: [[0, 1], [1, 0], [1, 1], [1, 2], [2, 1]], color: 0xd7fbff },
   { key: 'bigL', label: 'L BIG', tier: 4, coords: [[0, 0], [1, 0], [2, 0], [3, 0], [3, 1]], color: 0xf472b6 },
   { key: 'corner5', label: 'CANTO', tier: 4, coords: [[0, 0], [0, 1], [0, 2], [1, 0], [2, 0]], color: 0x22d3ee },
+  { key: 'v5', label: '5 V', tier: 3, coords: [[0, 0], [1, 0], [2, 0], [3, 0], [4, 0]], color: 0xa78bfa },
+  { key: 'square3', label: '3X3', tier: 3, coords: [[0, 0], [0, 1], [0, 2], [1, 0], [1, 1], [1, 2], [2, 0], [2, 1], [2, 2]], color: 0x67e8f9 },
+  { key: 'rect4x2', label: '4X2', tier: 4, coords: [[0, 0], [0, 1], [0, 2], [0, 3], [1, 0], [1, 1], [1, 2], [1, 3]], color: 0xf472b6 },
 ];
 
 export function createEmptyBoard(size = BLOCK_GAME_CONFIG.boardSize) {
@@ -154,16 +157,15 @@ export function hasAnyMove(board, availablePieces) {
 }
 
 export function difficultyTierFor({ totalClears = 0, moves = 0 } = {}) {
-  const { easyUntil, mediumUntil, hardUntil } = BLOCK_GAME_CONFIG.difficulty;
-  const score = Math.max(totalClears, Math.floor(moves / 4));
-  if (score < easyUntil) return 1;
-  if (score < mediumUntil) return 2;
-  if (score < hardUntil) return 3;
-  return 4;
+  const { startTier, movesPerTier, clearsPerTier } = BLOCK_GAME_CONFIG.difficulty;
+  return Math.min(4, startTier + Math.max(
+    Math.floor(moves / movesPerTier), Math.floor(totalClears / clearsPerTier),
+  ));
 }
 
 function poolForTier(tier) {
-  return PIECE_DEFS.filter((piece) => piece.tier <= tier);
+  // Small rescue pieces are no longer generated. Existing racks remain valid.
+  return PIECE_DEFS.filter((piece) => piece.tier <= tier && piece.coords.length >= 3);
 }
 
 function makePiece(def) {
@@ -179,27 +181,28 @@ function makePiece(def) {
 }
 
 function pickFromPool(pool, rng) {
-  const index = Math.floor(rng() * pool.length) % pool.length;
-  return pool[index];
+  const weight = (piece) => piece.coords.length * (1 + piece.tier);
+  let ticket = Math.floor(rng() * pool.reduce((sum, piece) => sum + weight(piece), 0));
+  for (const piece of pool) {
+    ticket -= weight(piece);
+    if (ticket < 0) return piece;
+  }
+  return pool[pool.length - 1];
 }
 
-export function generateThreePieces({ board, difficultyTier = 1, rng = Math.random } = {}) {
-  const tier = Math.max(1, Math.min(4, difficultyTier));
+export function generateThreePieces({ board, difficultyTier = difficultyTierFor(), rng = Math.random } = {}) {
+  const tier = Math.max(BLOCK_GAME_CONFIG.difficulty.startTier, Math.min(4, difficultyTier));
   const pool = poolForTier(tier);
-
-  for (let attempt = 0; attempt < 80; attempt += 1) {
-    const pieces = Array.from({ length: BLOCK_GAME_CONFIG.piecesPerBatch }, () => makePiece(pickFromPool(pool, rng)));
-    if (hasAnyMove(board, pieces)) return pieces;
+  const blocked = pool.filter((piece) => !hasValidPlacement(board, piece));
+  // Include an initially blocked shape when one exists, then draw without
+  // replacement. Do not reroll an unplayable rack or inject a rescue piece.
+  const selected = [pickFromPool(blocked.length ? blocked : pool, rng)];
+  while (selected.length < BLOCK_GAME_CONFIG.piecesPerBatch) {
+    selected.push(pickFromPool(pool.filter((piece) => !selected.includes(piece)), rng));
   }
-
-  const safePool = poolForTier(1);
-  const fittingDef = safePool.find((def) => hasValidPlacement(board, {
-    coords: def.coords,
-    used: false,
-  }));
-  if (!fittingDef) return [];
-
-  const firstPiece = makePiece(fittingDef);
-  const fillers = Array.from({ length: BLOCK_GAME_CONFIG.piecesPerBatch - 1 }, () => makePiece(pickFromPool(safePool, rng)));
-  return [firstPiece, ...fillers];
+  for (let index = selected.length - 1; index > 0; index -= 1) {
+    const other = Math.floor(rng() * (index + 1));
+    [selected[index], selected[other]] = [selected[other], selected[index]];
+  }
+  return selected.map(makePiece);
 }

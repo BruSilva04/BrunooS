@@ -90,7 +90,7 @@ export default class GameScene extends Phaser.Scene {
     this.totalClears = 0;
     this.bestCombo = 0;
     this.moves = 0;
-    this.difficultyTier = 1;
+    this.difficultyTier = difficultyTierFor();
     this.cashoutUnlocked = false;
     this.gameState = GAME_STATE.STARTING;
     this.resultShown = false;
@@ -465,13 +465,17 @@ export default class GameScene extends Phaser.Scene {
       if (piece.used) return;
       const homeX = Math.round(slotWidth * (index + 0.5));
       const homeY = this.pieceY + 14;
+      const bounds = getPieceBounds(piece);
+      const unit = Math.min(this.pieceUnit,
+        Math.floor((104 - (bounds.cols - 1) * 4) / bounds.cols),
+        Math.floor((82 - (bounds.rows - 1) * 4) / bounds.rows));
       const container = this.add.container(homeX, homeY).setDepth(22);
       const shadow = this.add.graphics();
       shadow.setPosition(4, 7);
-      this._drawPieceGraphic(shadow, piece, this.pieceUnit, 0x000000, 0.26);
+      this._drawPieceGraphic(shadow, piece, unit, 0x000000, 0.26);
 
       const gfx = this.add.graphics();
-      this._drawPieceGraphic(gfx, piece, this.pieceUnit);
+      this._drawPieceGraphic(gfx, piece, unit);
 
       const zone = this.add.zone(0, 0, 116, 96)
         .setInteractive({ useHandCursor: true });
@@ -628,11 +632,12 @@ export default class GameScene extends Phaser.Scene {
       this._animateClear(placement.rows, placement.columns);
       this._showToast(placement.clearCount >= 2 ? `${placement.clearCount} LINHAS!` : 'BOA!');
     }
-    if (this.demoMode) this._afterMove(placement.clearCount);
+    if (this.demoMode) this._afterMove();
     else this._sendPendingAction();
   }
 
-  _afterMove(clearCount) {
+  _afterMove() {
+    this.difficultyTier = difficultyTierFor({ totalClears: this.totalClears, moves: this.moves });
     if (!this.cashoutUnlocked && this.totalClears >= BLOCK_GAME_CONFIG.clearsToUnlockCashout) {
       this.cashoutUnlocked = true;
       this.gameState = GAME_STATE.CASHOUT_AVAILABLE;
@@ -911,6 +916,7 @@ export default class GameScene extends Phaser.Scene {
     const body = this.add.text(W / 2, py + 142, [
       'Arraste as pecas para o tabuleiro.',
       'Complete linhas ou colunas para limpar.',
+      'Novas peças podem chegar sem encaixe.',
       this.demoMode ? 'Com 3 limpezas, o resgate demo libera.' : 'Com 3 limpezas, você pode resgatar.',
       'Se nenhuma peca couber, a rodada termina.',
     ].join('\n'), {

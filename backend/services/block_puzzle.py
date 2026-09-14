@@ -6,6 +6,9 @@ BOARD_SIZE = 8
 ALLOWED_BETS_CENTS = {3000, 5000, 10000, 20000, 50000}
 CASHOUT_CLEARS = 3
 MAX_MULTIPLIER_HUNDREDTHS = 800
+START_TIER = 2
+MOVES_PER_TIER = 3
+CLEARS_PER_TIER = 3
 
 PIECE_DEFS = [
     ("single", 1, [[0, 0]], 0xffdf72),
@@ -27,6 +30,9 @@ PIECE_DEFS = [
     ("plus", 4, [[0, 1], [1, 0], [1, 1], [1, 2], [2, 1]], 0xd7fbff),
     ("bigL", 4, [[0, 0], [1, 0], [2, 0], [3, 0], [3, 1]], 0xf472b6),
     ("corner5", 4, [[0, 0], [0, 1], [0, 2], [1, 0], [2, 0]], 0x22d3ee),
+    ("v5", 3, [[0, 0], [1, 0], [2, 0], [3, 0], [4, 0]], 0xa78bfa),
+    ("square3", 3, [[0, 0], [0, 1], [0, 2], [1, 0], [1, 1], [1, 2], [2, 0], [2, 1], [2, 2]], 0x67e8f9),
+    ("rect4x2", 4, [[0, 0], [0, 1], [0, 2], [0, 3], [1, 0], [1, 1], [1, 2], [1, 3]], 0xf472b6),
 ]
 
 
@@ -45,34 +51,42 @@ def has_move(board, pieces):
 
 
 def difficulty(total_clears, moves):
-    score = max(total_clears, moves // 4)
-    return 1 + sum(score >= threshold for threshold in (3, 6, 9))
+    return min(4, START_TIER + max(moves // MOVES_PER_TIER, total_clears // CLEARS_PER_TIER))
 
 
-def generate_batch(board, tier, choose=secrets.choice):
-    pool = [definition for definition in PIECE_DEFS if definition[1] <= tier]
+def generate_batch(board, tier, randbelow=secrets.randbelow):
+    tier = max(START_TIER, min(4, tier))
+    pool = [definition for definition in PIECE_DEFS if definition[1] <= tier and len(definition[2]) >= 3]
+
+    def pick_weighted(candidates):
+        ticket = randbelow(sum(len(item[2]) * (1 + item[1]) for item in candidates))
+        for item in candidates:
+            ticket -= len(item[2]) * (1 + item[1])
+            if ticket < 0:
+                return item
 
     def make_piece(definition):
         key, level, coords, color = definition
         return {"id": secrets.token_hex(12), "key": key, "label": key,
                 "tier": level, "coords": deepcopy(coords), "color": color, "used": False}
 
-    for _ in range(80):
-        pieces = [make_piece(choose(pool)) for _ in range(3)]
-        if has_move(board, pieces):
-            return pieces
-    safe = [definition for definition in PIECE_DEFS if definition[1] == 1]
-    for definition in safe:
-        piece = make_piece(definition)
-        if has_move(board, [piece]):
-            return [piece, make_piece(choose(safe)), make_piece(choose(safe))]
-    return []
+    # Same policy as the admin demo: favor large shapes and include an initially
+    # blocked shape whenever possible. Never reroll a rack to guarantee a move.
+    blocked = [item for item in pool if not has_move(board, [{"coords": item[2]}])]
+    selected = [pick_weighted(blocked or pool)]
+    while len(selected) < 3:
+        selected.append(pick_weighted([item for item in pool if item not in selected]))
+    for index in range(len(selected) - 1, 0, -1):
+        other = randbelow(index + 1)
+        selected[index], selected[other] = selected[other], selected[index]
+    return [make_piece(item) for item in selected]
 
 
 def new_state():
     board = [[0] * BOARD_SIZE for _ in range(BOARD_SIZE)]
-    return {"board": board, "pieces": generate_batch(board, 1),
-            "moves": 0, "total_clears": 0, "best_combo": 0, "difficulty_tier": 1}
+    tier = difficulty(0, 0)
+    return {"board": board, "pieces": generate_batch(board, tier),
+            "moves": 0, "total_clears": 0, "best_combo": 0, "difficulty_tier": tier}
 
 
 def apply_move(state, piece_id, row, col):

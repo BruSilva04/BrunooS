@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {
   CELL,
+  PIECE_DEFS,
   canPlacePiece,
   clearCompletedLines,
   createEmptyBoard,
@@ -100,10 +101,52 @@ function fillCol(board, col, exceptRow = null) {
   assert.equal(hasValidPlacement(board, pieces[0]), true);
 }
 
-assert.equal(difficultyTierFor({ totalClears: 0, moves: 0 }), 1);
-assert.equal(difficultyTierFor({ totalClears: 3, moves: 0 }), 2);
-assert.equal(difficultyTierFor({ totalClears: 6, moves: 0 }), 3);
-assert.equal(difficultyTierFor({ totalClears: 9, moves: 0 }), 4);
+assert.equal(difficultyTierFor({ totalClears: 0, moves: 0 }), 2);
+assert.equal(difficultyTierFor({ totalClears: 0, moves: 2 }), 2);
+assert.equal(difficultyTierFor({ totalClears: 0, moves: 3 }), 3);
+assert.equal(difficultyTierFor({ totalClears: 0, moves: 6 }), 4);
+assert.equal(difficultyTierFor({ totalClears: 3, moves: 0 }), 3);
+assert.equal(difficultyTierFor({ totalClears: 6, moves: 0 }), 4);
+assert.equal(difficultyTierFor({ totalClears: 90, moves: 300 }), 4);
+
+{
+  // A horizontal corridor can fit some shapes, but each rack includes a blocked one.
+  const board = Array.from({ length: 8 }, (_, row) => Array.from({ length: 8 }, (_, col) => row === 0 ? 0 : (row + col) % 2));
+  for (let trial = 0; trial < 100; trial += 1) {
+    const pieces = generateThreePieces({ board, difficultyTier: 4, rng: () => trial / 100 });
+    assert.equal(pieces.length, 3);
+    assert.equal(new Set(pieces.map(piece => piece.key)).size, 3, 'rack has three distinct shapes');
+    assert.ok(pieces.some(piece => !hasValidPlacement(board, piece)), 'every rack includes an initially blocked shape');
+    assert.ok(pieces.every(piece => piece.coords.length >= 3), 'no tiny rescue shapes');
+  }
+}
+
+{
+  const board = Array.from({ length: 8 }, (_, row) => Array.from({ length: 8 }, (_, col) => (row + col) % 2));
+  const before = JSON.stringify(board);
+  let draws = 0;
+  const pieces = generateThreePieces({ board, rng: () => { draws++; return 0.5; } });
+  assert.equal(pieces.length, 3);
+  assert.equal(hasAnyMove(board, pieces), false, 'an unplayable rack is not replaced with a rescue piece');
+  assert.ok(draws < 10, 'no repeated searches for a playable rack');
+  assert.equal(JSON.stringify(board), before);
+}
+
+{
+  const board = createEmptyBoard();
+  for (const tier of [2, 3, 4]) {
+    const offered = new Set();
+    for (let trial = 0; trial < 100; trial += 1) {
+      const pieces = generateThreePieces({ board, difficultyTier: tier, rng: () => trial / 100 });
+      assert.ok(hasAnyMove(board, pieces), 'empty board always allows an opening move');
+      assert.ok(pieces.every(piece => piece.tier <= tier));
+      pieces.forEach(piece => offered.add(piece.key));
+    }
+    for (const shape of PIECE_DEFS.filter(piece => piece.tier <= tier && piece.coords.length >= 3)) {
+      assert.ok(offered.has(shape.key), `eligible shape can be drawn: ${shape.key}`);
+    }
+  }
+}
 
 {
   const totalClears = 2;

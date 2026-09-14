@@ -42,9 +42,9 @@ export const BLOCK_GAME_CONFIG = {
   dragOffsetMax: 76,
   clearAnimationMs: 110,
   difficulty: {
-    easyUntil: 3,
-    mediumUntil: 6,
-    hardUntil: 9,
+    startTier: 2,
+    movesPerTier: 3,
+    clearsPerTier: 3,
   },
 };
 

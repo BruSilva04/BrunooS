@@ -56,6 +56,7 @@ function scene(demo = false) {
   game.tweens = { add: animation => game.animations.push(animation) };
   game._cellRect = () => ({ cx: 1, cy: 1 });
   game.cellSize = 32;
+  game.pieceUnit = 24;
   for (const method of ['_drawBlocks', '_updateHud', '_drawCashoutButton', '_updateModeLabels', '_haptic', '_showToast']) game[method] = () => {};
   game._tutorialSeen = () => true;
   game._showResult = won => { game.resultShown = true; game.won = won; };
@@ -86,6 +87,18 @@ assert.equal(demo.animations[0].targets.length, 15, 'intersection flashes only o
 assert.ok(demo.animations[0].duration <= 120);
 assert.equal(demo.animations[0].delay, undefined, 'no per-cell stagger');
 assert.equal(config.state.balance, 70, 'demo never modifies wallet balance');
+
+const blockedDemo = scene(true);
+blockedDemo.board = Array.from({ length: 8 }, (_, row) => Array.from({ length: 8 }, (_, col) => (row + col) % 2));
+blockedDemo.moves = 2;
+blockedDemo.availablePieces = [{ id: 'last', coords: [[0, 0]], used: false, color: 1 }];
+blockedDemo._gameOver = () => { blockedDemo.resultShown = true; blockedDemo.gameState = 'GAME_OVER'; };
+blockedDemo._placePiece(blockedDemo.availablePieces[0], 0, 0, { container: object() });
+assert.equal(blockedDemo.difficultyTier, 3, 'admin difficulty increases on the next batch');
+assert.equal(blockedDemo.availablePieces.length, 3);
+assert.equal(logic.hasAnyMove(blockedDemo.board, blockedDemo.availablePieces), false);
+assert.equal(blockedDemo.gameState, 'GAME_OVER', 'admin also loses when new shapes cannot fit');
+assert.equal(config.state.balance, 70, 'harder admin rounds still use demo accounting');
 
 const real = scene();
 const pending = deferred();
@@ -146,4 +159,15 @@ rack.availablePieces = [{ id: 'used', used: true }, { id: 'available', coords: [
 rack._renderPieces();
 assert.equal(rack.pieceViews[0], undefined);
 assert.equal(rack.pieceViews[1].piece.id, 'available', 'used pieces do not change the input slot mapping');
+const largeRack = scene();
+largeRack.availablePieces = logic.PIECE_DEFS.filter(piece => ['v5', 'square3', 'rect4x2'].includes(piece.key));
+let previews = 0;
+largeRack._drawPieceGraphic = (graphics, piece, unit) => {
+  const bounds = logic.getPieceBounds(piece);
+  assert.ok(bounds.cols * unit + (bounds.cols - 1) * 4 <= 104, 'large shape stays inside its rack slot');
+  assert.ok(bounds.rows * unit + (bounds.rows - 1) * 4 <= 82, 'tall shape stays inside the rack');
+  previews++;
+};
+largeRack._renderPieces();
+assert.equal(previews, 6);
 console.log('Block game flow: immediate clears, real settlement, retries, account mode and scene lifecycle OK');
