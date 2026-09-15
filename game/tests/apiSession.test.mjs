@@ -38,6 +38,11 @@ try {
   };
   assert.deepEqual(await api.fetchLobby(), { balance: 0 });
 
+  const lastActivity = String(Date.now() - 60000);
+  window.sessionStorage.setItem('sereia_auth_last_seen_at', lastActivity);
+  await api.fetchLobby({ background: true });
+  assert.equal(window.sessionStorage.getItem('sereia_auth_last_seen_at'), lastActivity, 'polling does not extend an idle session');
+
   // Screens can distinguish an expired session from a recoverable outage.
   respond(401, { detail: 'Usuário ou senha inválidos.' });
   await assert.rejects(api.login('teste', 'senha'), (error) => {

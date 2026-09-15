@@ -1,6 +1,7 @@
 import Phaser from 'phaser';
 import { W, H, state } from '../config.js';
 import { BRAND } from '../brand.js';
+import { flushDemoHistory } from '../services/demoHistory.js';
 import {
   clearSession,
   confirmSandboxDeposit,
@@ -33,6 +34,11 @@ export default class LobbyScene extends Phaser.Scene {
     this.currentDeposit = null;
     this._subs = [];
     this.root = null;
+    this.loadVersion = 0;
+    this.loading = false;
+    this.syncTimer = null;
+    this.onReturnToPage = null;
+    this.historySyncPending = false;
   }
 
   create() {
@@ -40,30 +46,48 @@ export default class LobbyScene extends Phaser.Scene {
     this._mountLobby();
     this._renderLoading();
     this._loadLobby();
+    this.syncTimer = this.time.addEvent({
+      delay: 15000, loop: true, callback: () => this._loadLobby({ background: true }),
+    });
+    this.onReturnToPage = () => this._loadLobby({ background: true });
+    window.addEventListener('focus', this.onReturnToPage);
+    document.addEventListener('visibilitychange', this.onReturnToPage);
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this._cleanup());
   }
 
-  async _loadLobby() {
+  async _loadLobby({ background = false } = {}) {
+    if (background && (document.hidden || this.loading || this.walletBusy || this.modal || !this.snapshot)) return;
     const mountedRoot = this.root;
+    const version = ++this.loadVersion;
+    this.loading = true;
     try {
-      const snapshot = await fetchLobby();
-      if (!mountedRoot || this.root !== mountedRoot) return;
+      let historySyncPending = false;
+      try { await flushDemoHistory(); } catch { historySyncPending = true; }
+      if (!mountedRoot || this.root !== mountedRoot || version !== this.loadVersion) return;
+      const snapshot = await fetchLobby({ background });
+      if (!mountedRoot || this.root !== mountedRoot || version !== this.loadVersion) return;
+      if (background && (this.modal || this.walletBusy)) return;
+      const unchanged = JSON.stringify(this.snapshot) === JSON.stringify(snapshot)
+        && this.historySyncPending === historySyncPending;
+      this.historySyncPending = historySyncPending;
       this.snapshot = snapshot;
       this.user = this.snapshot.user;
       state.balance = Number(this.snapshot.balance || 0);
       state.demoMode = this.snapshot.demo_mode === true;
       state.activeBlockRound = this.snapshot.active_block_round || null;
       state.history = (this.snapshot.history || []).map((round) => Number(round.mult || 1)).slice(0, 5);
-      this.modal = null;
-      this._render();
+      if (!background) this.modal = null;
+      if (!background || !unchanged) this._render();
     } catch (error) {
-      if (!mountedRoot || this.root !== mountedRoot) return;
+      if (!mountedRoot || this.root !== mountedRoot || version !== this.loadVersion) return;
       if (error.status === 401) {
         clearSession();
         this.scene.start('Auth');
       } else if (this.snapshot) {
-        this.notice = error.message || 'Não foi possível atualizar a conta. Tente novamente.';
-        this._render();
+        if (!background) {
+          this.notice = error.message || 'Não foi possível atualizar a conta. Tente novamente.';
+          this._render();
+        }
       } else {
         this.root.innerHTML = `
           ${this._style()}
@@ -78,6 +102,8 @@ export default class LobbyScene extends Phaser.Scene {
           </main>`;
         this._bindDom();
       }
+    } finally {
+      if (this.root === mountedRoot && version === this.loadVersion) this.loading = false;
     }
   }
 
@@ -199,8 +225,13 @@ export default class LobbyScene extends Phaser.Scene {
           ${this._rolloverHtml()}
           ${this._adminEntryHtml()}
           <section class="history-panel">
-            <div class="section-title"><h3>Registros da conta</h3></div>
-            <p class="panel-description">${state.demoMode ? 'Partidas demo não movimentam o histórico financeiro.' : 'Apostas e resgates registrados na sua conta.'}</p>
+            <div class="section-title"><h3>Histórico de partidas</h3></div>
+            <p class="panel-description">${state.demoMode
+              ? this.snapshot.demo_history_available === false
+                ? 'Histórico demo aguardando atualização. Novas partidas ficam salvas neste navegador para sincronizar depois.'
+                : 'Partidas demo sincronizadas, sem movimentar saldo real.'
+              : 'Apostas e resgates registrados na sua conta.'}</p>
+            ${this.historySyncPending ? '<p class="panel-description" role="status">Há partidas demo aguardando conexão. A sincronização será tentada novamente.</p>' : ''}
             ${history.length ? history.slice(0, 5).map((round) => this._historyRowHtml(round)).join('') : '<div class="empty-state"><span aria-hidden="true">▤</span><strong>Nenhuma rodada registrada</strong><p>Suas rodadas aparecerão aqui.</p></div>'}
           </section>
         </aside>
@@ -294,7 +325,7 @@ export default class LobbyScene extends Phaser.Scene {
         ${this._profileRowHtml('Rollover restante', this._money(rollover.remaining || 0))}
       </section>
 
-      <p class="panel-description">Estatísticas dos registros da conta. Não incluem partidas demo.</p>
+      <p class="panel-description">${state.demoMode ? 'Estatísticas das suas partidas, incluindo demonstrações.' : 'Estatísticas das partidas registradas na sua conta.'}</p>
       <section class="stats-grid profile-stats">
         ${this._statHtml('Rodadas registradas', stats.rounds || 0)}
         ${this._statHtml('Maior multiplicador', `${Number(stats.maxMult || 1).toFixed(2)}x`)}
@@ -441,7 +472,7 @@ export default class LobbyScene extends Phaser.Scene {
     const payout = Number(round.payout || 0);
     return `
       <div class="history-row ${won ? 'won' : 'lost'}">
-        <span>${won ? 'Vitória' : 'Perda'}</span>
+        <span>${round.demo_mode ? 'Demo · ' : ''}${won ? 'Vitória' : 'Perda'}</span>
         <strong>${Number(round.mult || 1).toFixed(2)}x</strong>
         <em>${won ? '+' : ''}${this._money(payout)}</em>
       </div>
@@ -527,6 +558,7 @@ export default class LobbyScene extends Phaser.Scene {
         this.modal = null;
         this._render();
         this.root.querySelector(`[data-tab="${this.currentTab}"]`)?.focus({ preventScroll: true });
+        this._loadLobby({ background: true });
       });
     });
 
@@ -995,6 +1027,12 @@ export default class LobbyScene extends Phaser.Scene {
   }
 
   _cleanup() {
+    this.loadVersion += 1;
+    this.syncTimer?.remove(false);
+    if (this.onReturnToPage) {
+      window.removeEventListener('focus', this.onReturnToPage);
+      document.removeEventListener('visibilitychange', this.onReturnToPage);
+    }
     this._subs.forEach((item) => {
       if (item && item.destroy) item.destroy();
     });

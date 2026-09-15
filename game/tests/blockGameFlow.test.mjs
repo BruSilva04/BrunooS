@@ -15,6 +15,7 @@ const dependencies = {
   '../config.js': config,
   '../block/BlockPuzzleLogic.js': logic,
   '../utils/SoundManager.js': { default: class {} },
+  '../services/demoHistory.js': { queueDemoResult: () => {}, flushDemoHistory: async () => {} },
   '../services/api.js': {
     startBlockRound: (...args) => start(...args),
     placeBlockPiece: (...args) => move(...args),
@@ -88,6 +89,28 @@ assert.ok(demo.animations[0].duration <= 120);
 assert.equal(demo.animations[0].delay, undefined, 'no per-cell stagger');
 assert.equal(config.state.balance, 70, 'demo never modifies wallet balance');
 
+const cashoutUI = scene(true);
+for (const name of ['cashoutGfx', 'cashoutLabel', 'cashoutZone', 'cashoutSub']) {
+  cashoutUI[name] = object();
+  cashoutUI[name].setVisible = visible => { cashoutUI[name].visible = visible; };
+}
+cashoutUI.cashoutZone.input = { enabled: true };
+cashoutUI.cashoutY = 700;
+cashoutUI.cashoutUnlocked = true; // Even a stale flag must not expose early cashout.
+cashoutUI.totalClears = 4;
+GameScene.prototype._drawCashoutButton.call(cashoutUI);
+assert.equal(cashoutUI.cashoutGfx.visible, false);
+assert.equal(cashoutUI.cashoutLabel.visible, false);
+assert.equal(cashoutUI.cashoutZone.input.enabled, false);
+cashoutUI._cashOut();
+assert.equal(cashoutUI.resultShown, false);
+cashoutUI.totalClears = 5;
+GameScene.prototype._drawCashoutButton.call(cashoutUI);
+assert.equal(cashoutUI.cashoutGfx.visible, true);
+assert.equal(cashoutUI.cashoutZone.input.enabled, true);
+cashoutUI._cashOut();
+assert.equal(cashoutUI.won, true);
+
 const blockedDemo = scene(true);
 blockedDemo.board = Array.from({ length: 8 }, (_, row) => Array.from({ length: 8 }, (_, col) => (row + col) % 2));
 blockedDemo.moves = 2;
@@ -117,6 +140,7 @@ assert.equal(real.roundVersion, 1);
 
 // A failed cashout cannot display success; retry sends the original action ID.
 real.cashoutUnlocked = true;
+real.totalClears = 5;
 const attempts = [];
 cashout = async (id, payload) => { attempts.push({ id, ...payload }); throw new Error('connection lost'); };
 real._cashOut();

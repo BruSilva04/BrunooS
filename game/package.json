@@ -6,12 +6,13 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "test": "npm run test:block && npm run test:api && npm run test:ledger && npm run test:flow && npm run test:generation",
+    "test": "npm run test:block && npm run test:api && npm run test:ledger && npm run test:flow && npm run test:generation && npm run test:history",
     "test:block": "node tests/blockPuzzleLogic.test.mjs",
     "test:api": "node tests/apiSession.test.mjs",
     "test:ledger": "node tests/blockLedger.test.mjs",
     "test:flow": "node --experimental-vm-modules tests/blockGameFlow.test.mjs",
     "test:generation": "node tests/blockGenerationParity.test.mjs",
+    "test:history": "node --experimental-vm-modules tests/historySync.test.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

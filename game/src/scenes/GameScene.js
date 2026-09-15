@@ -9,6 +9,7 @@ import {
 } from '../config.js';
 import SoundManager from '../utils/SoundManager.js';
 import { startBlockRound, fetchBlockRound, placeBlockPiece, cashoutBlockRound } from '../services/api.js';
+import { queueDemoResult, flushDemoHistory } from '../services/demoHistory.js';
 import {
   canPlacePiece,
   createEmptyBoard,
@@ -83,6 +84,7 @@ export default class GameScene extends Phaser.Scene {
     this.lifecycle = {};
     this.errorOverlay = null;
     this.settledPayout = 0;
+    this.demoHistorySaving = false;
     this.board = createEmptyBoard();
     this.availablePieces = [];
     this.pieceViews = [];
@@ -351,7 +353,8 @@ export default class GameScene extends Phaser.Scene {
     this.totalClears = response.total_clears;
     this.bestCombo = response.best_combo;
     this.difficultyTier = response.difficulty_tier;
-    this.cashoutUnlocked = response.cashout_unlocked;
+    this.cashoutUnlocked = response.cashout_unlocked === true
+      && this.totalClears >= BLOCK_GAME_CONFIG.clearsToUnlockCashout;
     this.settledPayout = response.payout;
     state.balance = response.balance;
     state.activeBlockRound = response.status === 'active' ? { round_id: this.roundId, bet: this.bet } : null;
@@ -725,12 +728,12 @@ export default class GameScene extends Phaser.Scene {
     if (!this.valueText || !this.progressText) return;
     const progress = Math.min(this.totalClears, BLOCK_GAME_CONFIG.clearsToUnlockCashout);
     this.valueText.setText(money(this._currentValue()));
-    this.progressText.setText(`RESGATE ${progress}/${BLOCK_GAME_CONFIG.clearsToUnlockCashout}  |  NÍVEL ${this.difficultyTier}  |  ${this.moves} JOGADAS`);
+    this.progressText.setText(`LIMPEZAS ${progress}/${BLOCK_GAME_CONFIG.clearsToUnlockCashout}  |  NÍVEL ${this.difficultyTier}  |  ${this.moves} JOGADAS`);
   }
 
   _drawCashoutButton() {
     if (!this.cashoutGfx) return;
-    const unlocked = this.cashoutUnlocked;
+    const unlocked = this.cashoutUnlocked && this.totalClears >= BLOCK_GAME_CONFIG.clearsToUnlockCashout;
     const pending = [GAME_STATE.STARTING, GAME_STATE.MOVE_PENDING, GAME_STATE.CASHOUT_PENDING, GAME_STATE.ERROR].includes(this.gameState);
     const done = this.resultShown || this.gameState === GAME_STATE.GAME_OVER;
     const x = 20;
@@ -739,6 +742,15 @@ export default class GameScene extends Phaser.Scene {
     const height = 58;
 
     this.cashoutGfx.clear();
+    const showButton = unlocked && !done;
+    this.cashoutGfx.setVisible(showButton);
+    this.cashoutLabel.setVisible(showButton);
+    this.cashoutZone.setVisible(showButton);
+    if (this.cashoutZone.input) this.cashoutZone.input.enabled = showButton && !pending;
+    if (!showButton) {
+      this.cashoutSub.setText(done ? 'Rodada finalizada' : `Resgate após ${BLOCK_GAME_CONFIG.clearsToUnlockCashout} linhas ou colunas (${Math.min(this.totalClears, BLOCK_GAME_CONFIG.clearsToUnlockCashout)}/${BLOCK_GAME_CONFIG.clearsToUnlockCashout})`);
+      return;
+    }
     if (unlocked && !pending && !done) {
       this.cashoutGfx.fillGradientStyle(0xa78bfa, 0xa78bfa, 0x67e8f9, 0x67e8f9, 1);
       this.cashoutGfx.fillRoundedRect(x, y, width, height, 10);
@@ -755,25 +767,16 @@ export default class GameScene extends Phaser.Scene {
     this.cashoutGfx.lineStyle(1, 0xa78bfa, 0.24);
     this.cashoutGfx.strokeRoundedRect(x, y, width, height, 10);
 
-    if (pending) {
-      this.cashoutLabel.setText('CONFIRMANDO...');
-      this.cashoutSub.setText(this.gameState === GAME_STATE.ERROR ? 'aguardando reconexão' : 'aguarde a confirmação da rodada');
-    } else if (done) {
-      this.cashoutLabel.setText('RODADA FINALIZADA');
-      this.cashoutSub.setText('veja o resultado');
-    } else {
-      const remaining = Math.max(0, BLOCK_GAME_CONFIG.clearsToUnlockCashout - this.totalClears);
-      this.cashoutLabel.setText(`RESGATE LIBERA EM ${remaining}`);
-      this.cashoutSub.setText('complete linhas ou colunas');
-    }
+    this.cashoutLabel.setText('CONFIRMANDO...');
+    this.cashoutSub.setText(this.gameState === GAME_STATE.ERROR ? 'aguardando reconexão' : 'aguarde a confirmação da rodada');
     this.cashoutLabel.setColor('#f4f7ff');
   }
 
   _cashOut() {
     if (this.resultShown || !this._canPlayInput()) return;
-    if (!this.cashoutUnlocked) {
+    if (!this.cashoutUnlocked || this.totalClears < BLOCK_GAME_CONFIG.clearsToUnlockCashout) {
       this.sounds.playInvalidPlace();
-      this._showToast('COMPLETE 3 LINHAS OU COLUNAS');
+      this._showToast(`COMPLETE ${BLOCK_GAME_CONFIG.clearsToUnlockCashout} LINHAS OU COLUNAS`);
       return;
     }
     this._clearDrag();
@@ -866,6 +869,31 @@ export default class GameScene extends Phaser.Scene {
     });
 
     overlay.add([dim, panel, title, value, details, note, replay, lobby]);
+    if (this.demoMode) {
+      const result = {
+        request_id: this.startRequestId, bet: this.bet, status: won ? 'won' : 'lost',
+        moves: this.moves, total_clears: this.totalClears, best_combo: this.bestCombo,
+      };
+      note.setInteractive({ useHandCursor: true });
+      note.on('pointerdown', () => this._syncDemoResult(result, note));
+      this._syncDemoResult(result, note);
+    }
+  }
+
+  async _syncDemoResult(result, note) {
+    if (this.demoHistorySaving) return;
+    this.demoHistorySaving = true;
+    const lifecycle = this.lifecycle;
+    note.setText('Sincronizando partida demo…');
+    try {
+      queueDemoResult(result);
+      await flushDemoHistory();
+      if (this.lifecycle === lifecycle) note.setText('Partida demo salva no histórico. Sem movimentar saldo real.');
+    } catch {
+      if (this.lifecycle === lifecycle) note.setText('Histórico pendente. Toque aqui para tentar sincronizar novamente.');
+    } finally {
+      if (this.lifecycle === lifecycle) this.demoHistorySaving = false;
+    }
   }
 
   _makePanelButton(x, y, width, height, text, primary, handler) {
@@ -917,7 +945,7 @@ export default class GameScene extends Phaser.Scene {
       'Arraste as pecas para o tabuleiro.',
       'Complete linhas ou colunas para limpar.',
       'Novas peças podem chegar sem encaixe.',
-      this.demoMode ? 'Com 3 limpezas, o resgate demo libera.' : 'Com 3 limpezas, você pode resgatar.',
+      `Após ${BLOCK_GAME_CONFIG.clearsToUnlockCashout} limpezas, o resgate aparece.`,
       'Se nenhuma peca couber, a rodada termina.',
     ].join('\n'), {
       fontSize: '14px',

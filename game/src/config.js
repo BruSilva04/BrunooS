@@ -32,7 +32,7 @@ export const CASHOUT_UNLOCK_MULT = 2.5;
 export const BLOCK_GAME_CONFIG = {
   boardSize: 8,
   piecesPerBatch: 3,
-  clearsToUnlockCashout: 3,
+  clearsToUnlockCashout: 5,
   minimumBetCents: BLOCK_MIN_BET_CENTS,
   baseValueMultiplier: 1,
   clearValueStep: 0.32,

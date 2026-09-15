@@ -165,7 +165,8 @@ export function difficultyTierFor({ totalClears = 0, moves = 0 } = {}) {
 
 function poolForTier(tier) {
   // Small rescue pieces are no longer generated. Existing racks remain valid.
-  return PIECE_DEFS.filter((piece) => piece.tier <= tier && piece.coords.length >= 3);
+  const minimumCells = tier >= 3 ? 4 : 3;
+  return PIECE_DEFS.filter((piece) => piece.tier <= tier && piece.coords.length >= minimumCells);
 }
 
 function makePiece(def) {
@@ -181,7 +182,7 @@ function makePiece(def) {
 }
 
 function pickFromPool(pool, rng) {
-  const weight = (piece) => piece.coords.length * (1 + piece.tier);
+  const weight = (piece) => piece.coords.length ** 2 * (1 + piece.tier);
   let ticket = Math.floor(rng() * pool.reduce((sum, piece) => sum + weight(piece), 0));
   for (const piece of pool) {
     ticket -= weight(piece);

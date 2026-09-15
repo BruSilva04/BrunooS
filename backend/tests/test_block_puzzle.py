@@ -67,7 +67,7 @@ class PuzzleRules(unittest.TestCase):
             self.assertEqual(len(batch), 3)
             self.assertEqual(len({item['key'] for item in batch}), 3)
             self.assertTrue(any(not has_move(board, [item]) for item in batch))
-            self.assertTrue(all(len(item['coords']) >= 3 for item in batch))
+            self.assertTrue(all(len(item['coords']) >= 4 for item in batch))
         self.assertEqual(board, before)
 
     def test_unplayable_new_batch_ends_round_without_rescue(self):
@@ -172,10 +172,12 @@ class BlockAPI(unittest.TestCase):
     def test_cashout_uses_persisted_progress_and_cents(self):
         body = {"action_id": str(uuid4()), "version": 0}
         self.assertEqual(self.post(f'/rounds/{self.round_id}/cashout', body).status_code, 409)
-        self.state.update(total_clears=3, moves=8)
+        self.state.update(total_clears=4, moves=8)
+        self.assertEqual(self.post(f'/rounds/{self.round_id}/cashout', body).status_code, 409)
+        self.state.update(total_clears=5, moves=8)
         self.assertEqual(self.post(f'/rounds/{self.round_id}/cashout', body).status_code, 200)
         params = block.call_round_rpc.call_args.args[1]
-        self.assertEqual(params['p_payout_cents'], 6480)
+        self.assertEqual(params['p_payout_cents'], 8400)
         self.assertEqual(params['p_status'], 'won')
 
     def test_retry_returns_committed_result_without_second_rpc(self):
@@ -213,6 +215,38 @@ class BlockAPI(unittest.TestCase):
             })
             self.assertEqual(response.status_code, 503)
             reserve.assert_not_awaited()
+
+    def test_demo_history_only_accepts_the_demo_owner_without_wallet_writes(self):
+        body = {'request_id': str(uuid4()), 'bet': 30, 'status': 'won', 'moves': 8, 'total_clears': 5, 'best_combo': 2}
+        with patch.object(block, 'save_demo_round', new=AsyncMock(return_value={'round_id': body['request_id']})) as save:
+            self.assertEqual(self.post('/demo-results', body).status_code, 403)
+            save.assert_not_awaited()
+            self.user.update(username='owner', role='admin')
+            with patch.dict(os.environ, {'ADMIN_USERNAME': 'owner'}):
+                result = self.post('/demo-results', body)
+            self.assertEqual(result.status_code, 200)
+            self.assertTrue(result.json()['saved'])
+            self.assertEqual(save.call_args.args[0]['payout'], 84)
+            self.assertEqual(save.call_args.args[0]['user_id'], self.user['id'])
+            block.call_round_rpc.assert_not_awaited()
+
+    def test_demo_cannot_record_a_cashout_before_five_clears(self):
+        self.user.update(username='owner', role='admin')
+        with patch.dict(os.environ, {'ADMIN_USERNAME': 'owner'}), patch.object(block, 'save_demo_round', new=AsyncMock()) as save:
+            for clears in (0, 3, 4):
+                result = self.post('/demo-results', {'request_id': str(uuid4()), 'bet': 30, 'status': 'won', 'moves': 8, 'total_clears': clears, 'best_combo': 0})
+                self.assertEqual(result.status_code, 422)
+            save.assert_not_awaited()
+
+    def test_lost_demo_has_zero_payout_and_persistence_failure_is_visible(self):
+        self.user.update(username='owner', role='admin')
+        body = {'request_id': str(uuid4()), 'bet': 30, 'status': 'lost', 'moves': 8, 'total_clears': 2, 'best_combo': 1}
+        with patch.dict(os.environ, {'ADMIN_USERNAME': 'owner'}), patch.object(block, 'save_demo_round', new=AsyncMock(return_value={'round_id': body['request_id']})) as save:
+            self.assertEqual(self.post('/demo-results', body).status_code, 200)
+            self.assertEqual(save.call_args.args[0]['payout'], 0)
+            save.side_effect = RuntimeError('offline')
+            with patch.object(block.logger, 'exception'):
+                self.assertEqual(self.post('/demo-results', body).status_code, 503)
 
 
 if __name__ == '__main__':

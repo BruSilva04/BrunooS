@@ -1,11 +1,12 @@
 from decimal import Decimal
 import logging
 from uuid import UUID
+from typing import Literal
 
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, ConfigDict, Field
 
-from db.block_rounds import call_round_rpc, find_round
+from db.block_rounds import call_round_rpc, find_round, save_demo_round
 from db.database import get_user_by_id
 from routers.auth import bearer_token
 from services.account_mode import is_demo_user
@@ -35,6 +36,16 @@ class MoveRequest(RoundAction):
     piece_id: str = Field(min_length=1, max_length=64)
     row: int = Field(ge=0, lt=8, strict=True)
     col: int = Field(ge=0, lt=8, strict=True)
+
+
+class DemoResultRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    request_id: UUID
+    bet: Decimal = Field(gt=0, le=500, decimal_places=2)
+    status: Literal['won', 'lost']
+    moves: int = Field(ge=1, le=100000, strict=True)
+    total_clears: int = Field(ge=0, le=1600000, strict=True)
+    best_combo: int = Field(ge=0, le=16, strict=True)
 
 
 async def current_player(authorization):
@@ -80,6 +91,35 @@ def rpc_snapshot(result):
 def unavailable(exc):
     logger.exception("Block round persistence failed", exc_info=exc)
     return HTTPException(503, "O jogo está temporariamente indisponível. Sua rodada pode ser retomada.")
+
+
+@router.post("/demo-results")
+async def record_demo_result(payload: DemoResultRequest, authorization: str | None = Header(default=None)):
+    user = await current_player(authorization)
+    if not is_demo_user(user):
+        raise HTTPException(403, "Histórico demo é exclusivo da conta demo do administrador.")
+    bet_cents = int(payload.bet * 100)
+    if (bet_cents not in ALLOWED_BETS_CENTS or payload.total_clears > payload.moves * 16
+            or payload.best_combo > payload.total_clears
+            or (payload.status == 'won' and payload.total_clears < CASHOUT_CLEARS)):
+        raise HTTPException(422, "Resultado demo inválido.")
+    progress = {"moves": payload.moves, "total_clears": payload.total_clears}
+    try:
+        saved = await save_demo_round({
+            "round_id": str(payload.request_id), "user_id": str(user["id"]),
+            "bet": float(payload.bet), "status": payload.status,
+            "moves": payload.moves, "total_clears": payload.total_clears,
+            "best_combo": payload.best_combo, "multiplier": multiplier_hundredths(progress) / 100,
+            "payout": payout_cents(bet_cents, progress) / 100 if payload.status == 'won' else 0,
+        })
+        if not saved:
+            raise HTTPException(409, "Não foi possível identificar esta partida demo.")
+        return {"saved": True, "round_id": saved["round_id"], "demo_mode": True}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Demo history persistence failed")
+        raise HTTPException(503, "Histórico demo indisponível. O resultado será sincronizado ao reconectar.") from exc
 
 
 @router.post("/rounds")
@@ -146,7 +186,7 @@ async def perform_action(user, round_id, payload, move=False):
             payout = 0
         else:
             if state["total_clears"] < CASHOUT_CLEARS:
-                raise HTTPException(409, "Complete três linhas ou colunas para liberar o resgate.")
+                raise HTTPException(409, "Complete cinco linhas ou colunas para liberar o resgate.")
             status = "won"
             payout = payout_cents(int(Decimal(str(current["bet"])) * 100), state)
         return rpc_snapshot(await call_round_rpc("commit_block_round", {

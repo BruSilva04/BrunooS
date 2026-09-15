@@ -88,7 +88,7 @@ export function clearSession() {
 }
 
 async function request(path, options = {}) {
-  const { auth = true, ...fetchOptions } = options;
+  const { auth = true, touchSession: touch = true, ...fetchOptions } = options;
   const headers = {
     'Content-Type': 'application/json',
     ...(fetchOptions.headers || {}),
@@ -96,7 +96,7 @@ async function request(path, options = {}) {
   if (fetchOptions.headers) {
     delete fetchOptions.headers;
   }
-  const token = auth ? getAuthToken() : null;
+  const token = auth ? getAuthToken({ touch }) : null;
   if (auth && token) {
     headers.Authorization = `Bearer ${token}`;
   }
@@ -279,13 +279,19 @@ export function register(payload) {
   });
 }
 
-export function fetchLobby() {
-  return request('/api/lobby/me');
+export function fetchLobby({ background = false } = {}) {
+  return request('/api/lobby/me', { touchSession: !background, signal: AbortSignal.timeout(10000) });
 }
 
 export function startBlockRound(bet, requestId) {
   return request('/api/block/rounds', {
     method: 'POST', body: JSON.stringify({ bet, request_id: requestId }),
+  });
+}
+
+export function recordDemoRound(result) {
+  return request('/api/block/demo-results', {
+    method: 'POST', body: JSON.stringify(result), touchSession: false, signal: AbortSignal.timeout(10000),
   });
 }
 

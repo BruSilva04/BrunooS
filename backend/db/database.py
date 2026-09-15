@@ -9,6 +9,7 @@ from urllib.parse import parse_qsl, urlencode
 
 import anyio
 from dotenv import load_dotenv
+from postgrest.exceptions import APIError
 from supabase import Client, create_client
 from services.auth import hash_password
 from services.account_mode import is_demo_user
@@ -1460,23 +1461,34 @@ def _round_multiplier(round_data: dict[str, Any]) -> float:
 
 
 async def get_lobby_snapshot(user_id: str) -> dict[str, Any] | None:
-    user = await get_user_by_id(user_id)
+    # Read the wallet and its history under the same database snapshot/lock.
+    demo_history_available = True
+    try:
+        response = await anyio.to_thread.run_sync(lambda: get_supabase_client().rpc(
+            "read_lobby_snapshot", {"p_user_id": str(user_id)},
+        ).execute())
+        data = response.data
+    except APIError as exc:
+        if exc.code != "PGRST202":
+            raise
+        # Keep the existing lobby available until the new SQL migration is applied.
+        # Only a missing RPC permits this path; database failures still propagate.
+        demo_history_available = False
+        user = await get_user_by_id(user_id)
+        if not user:
+            return None
+        response = await anyio.to_thread.run_sync(lambda: get_supabase_client()
+            .table(ROUNDS_TABLE).select("*").eq("user_id", user_id)
+            .order("created_at", desc=True).limit(100).execute())
+        data = {"user": user, "rounds": response.data or []}
+    if isinstance(data, list):
+        data = data[0] if data else None
+    if not isinstance(data, dict):
+        raise RuntimeError("Empty lobby snapshot")
+    user = data.get("user")
     if not user:
         return None
-
-    def fetch_rounds():
-        return (
-            get_supabase_client()
-            .table(ROUNDS_TABLE)
-            .select("*")
-            .eq("user_id", user_id)
-            .order("created_at", desc=True)
-            .limit(100)
-            .execute()
-        )
-
-    response = await anyio.to_thread.run_sync(fetch_rounds)
-    rounds = response.data or []
+    rounds = data.get("rounds") or []
     played_rounds = [
         round_data
         for round_data in rounds
@@ -1497,6 +1509,8 @@ async def get_lobby_snapshot(user_id: str) -> dict[str, Any] | None:
             "won": won,
             "bet": bet,
             "payout": round(payout - bet, 2) if won else -bet,
+            "demo_mode": bool(round_data.get("demo_mode")),
+            "created_at": round_data.get("created_at"),
         })
 
     return {
@@ -1519,6 +1533,7 @@ async def get_lobby_snapshot(user_id: str) -> dict[str, Any] | None:
         "bonus_balance": float(user.get("bonus_balance", 0) or 0),
         "rollover": rollover_status(user),
         "demo_mode": is_demo_user(user),
+        "demo_history_available": demo_history_available,
         "active_block_round": next(({
             "round_id": item["round_id"], "bet": item["bet"],
         } for item in rounds if item.get("game_type") == "block" and item.get("status") == "active"), None),

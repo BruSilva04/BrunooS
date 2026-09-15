@@ -140,18 +140,19 @@ assert.equal(difficultyTierFor({ totalClears: 90, moves: 300 }), 4);
       const pieces = generateThreePieces({ board, difficultyTier: tier, rng: () => trial / 100 });
       assert.ok(hasAnyMove(board, pieces), 'empty board always allows an opening move');
       assert.ok(pieces.every(piece => piece.tier <= tier));
+      assert.ok(pieces.every(piece => piece.coords.length >= (tier >= 3 ? 4 : 3)), 'later batches exclude three-cell pieces');
       pieces.forEach(piece => offered.add(piece.key));
     }
-    for (const shape of PIECE_DEFS.filter(piece => piece.tier <= tier && piece.coords.length >= 3)) {
+    for (const shape of PIECE_DEFS.filter(piece => piece.tier <= tier && piece.coords.length >= (tier >= 3 ? 4 : 3))) {
       assert.ok(offered.has(shape.key), `eligible shape can be drawn: ${shape.key}`);
     }
   }
 }
 
 {
-  const totalClears = 2;
+  const totalClears = 4;
   const placement = { clearCount: 1 };
-  const cashoutUnlocked = totalClears + placement.clearCount >= 3;
+  const cashoutUnlocked = totalClears + placement.clearCount >= 5;
 
   assert.equal(cashoutUnlocked, true);
 }

@@ -4,7 +4,7 @@ import secrets
 
 BOARD_SIZE = 8
 ALLOWED_BETS_CENTS = {3000, 5000, 10000, 20000, 50000}
-CASHOUT_CLEARS = 3
+CASHOUT_CLEARS = 5
 MAX_MULTIPLIER_HUNDREDTHS = 800
 START_TIER = 2
 MOVES_PER_TIER = 3
@@ -56,12 +56,13 @@ def difficulty(total_clears, moves):
 
 def generate_batch(board, tier, randbelow=secrets.randbelow):
     tier = max(START_TIER, min(4, tier))
-    pool = [definition for definition in PIECE_DEFS if definition[1] <= tier and len(definition[2]) >= 3]
+    minimum_cells = 4 if tier >= 3 else 3
+    pool = [definition for definition in PIECE_DEFS if definition[1] <= tier and len(definition[2]) >= minimum_cells]
 
     def pick_weighted(candidates):
-        ticket = randbelow(sum(len(item[2]) * (1 + item[1]) for item in candidates))
+        ticket = randbelow(sum(len(item[2]) ** 2 * (1 + item[1]) for item in candidates))
         for item in candidates:
-            ticket -= len(item[2]) * (1 + item[1])
+            ticket -= len(item[2]) ** 2 * (1 + item[1])
             if ticket < 0:
                 return item
 
