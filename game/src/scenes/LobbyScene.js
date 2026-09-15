@@ -17,6 +17,8 @@ const TABS = [
   { key: 'profile', label: 'Perfil', icon: '○' },
 ];
 
+const WITHDRAWALS_ENABLED = import.meta.env?.VITE_WITHDRAWALS_ENABLED === 'true';
+
 export default class LobbyScene extends Phaser.Scene {
   constructor() {
     super({ key: 'Lobby' });
@@ -381,7 +383,8 @@ export default class LobbyScene extends Phaser.Scene {
     const user = this.snapshot?.user || this.user || {};
     const needsCustomer = isDeposit && !user.has_kyc;
     const rollover = this._rollover();
-    const canWithdraw = rollover.complete;
+    const rolloverComplete = rollover.complete;
+    const canWithdraw = WITHDRAWALS_ENABLED && rolloverComplete;
 
     if (isDeposit) {
       return `
@@ -421,8 +424,8 @@ export default class LobbyScene extends Phaser.Scene {
       <div class="modal-backdrop" data-action="close-modal">
         <section class="modal-card wallet-modal" data-modal="${type}" tabindex="-1" role="dialog" aria-modal="true" aria-label="${title}">
           <h2>${title}</h2>
-          <p>${state.demoMode ? 'Operação de demonstração, sem transferência de dinheiro real.' : canWithdraw ? 'Solicite o saque para uma chave Pix. O valor fica reservado na carteira.' : `Movimente mais ${this._money(rollover.remaining || 0)} antes de sacar.`}</p>
-          ${!canWithdraw ? this._rolloverHtml(true) : ''}
+          <p>${state.demoMode ? 'Operação de demonstração, sem transferência de dinheiro real.' : rolloverComplete ? 'Solicite o saque para uma chave Pix. O valor fica reservado na carteira.' : `Movimente mais ${this._money(rollover.remaining || 0)} antes de sacar.`}</p>
+          ${!rolloverComplete ? this._rolloverHtml(true) : ''}
           <label>
             Valor
             <input name="withdraw-amount" inputmode="decimal" value="20" />
@@ -663,6 +666,12 @@ export default class LobbyScene extends Phaser.Scene {
 
   async _submitWithdrawal() {
     if (this.walletBusy) return;
+    if (!WITHDRAWALS_ENABLED) {
+      this.walletMessage = 'Saques temporariamente indisponiveis.';
+      this._render();
+      return;
+    }
+
     const mountedRoot = this.root;
     const rollover = this._rollover();
     if (!rollover.complete) {

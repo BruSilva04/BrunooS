@@ -4,6 +4,8 @@ Puzzle de blocos com frontend em Phaser/Vite e plataforma de contas em FastAPI/S
 
 Antes de publicar esta versão, aplique as [migrações de partidas](backend/db/migrations/README.md) no Supabase. Quem já executou `20260912_block_rounds.sql` precisa executar apenas `20260914_block_cashout_history.sql`, que adiciona o histórico demo e a regra de cinco limpezas sem redefinir saldos existentes. Configure `PAYMENT_PROVIDER=amplopay` e as credenciais do provedor para Pix de contas reais; falhas de configuração não habilitam saldo simulado.
 
+Durante o teste fechado, depósitos continuam habilitados e saques de clientes ficam pausados por padrão com `WITHDRAWALS_ENABLED=false` no backend e `VITE_WITHDRAWALS_ENABLED` ausente ou diferente de `true` no frontend. O modal de saque permanece visível, mas o botão de solicitar saque fica desabilitado. O backend também bloqueia `POST /api/wallet/withdrawals` com 403 enquanto a flag não for alterada para `true`.
+
 ## Desenvolvimento
 
 Frontend, com Node.js 20 ou superior:

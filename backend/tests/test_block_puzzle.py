@@ -208,7 +208,15 @@ class BlockAPI(unittest.TestCase):
             self.assertEqual(wallet.account_payment_provider(self.user), 'sandbox')
 
     def test_missing_callback_does_not_reserve_withdrawal(self):
-        with patch.object(wallet, 'current_user', new=AsyncMock(return_value=self.user)), patch.object(wallet, 'create_withdrawal_request', new=AsyncMock()) as reserve, patch.dict(os.environ, {'PAYMENT_PROVIDER': 'amplopay', 'BACKEND_PUBLIC_URL': '', 'RENDER_EXTERNAL_URL': ''}):
+        with patch.object(wallet, 'current_user', new=AsyncMock(return_value=self.user)), patch.object(wallet, 'create_withdrawal_request', new=AsyncMock()) as reserve, patch.dict(os.environ, {'WITHDRAWALS_ENABLED': 'false', 'PAYMENT_PROVIDER': 'amplopay', 'BACKEND_PUBLIC_URL': '', 'RENDER_EXTERNAL_URL': ''}):
+            response = self.client.post('/api/wallet/withdrawals', json={
+                'amount': 20, 'pix_key': 'player@example.test', 'pix_key_type': 'email',
+                'owner_name': 'Player Test', 'owner_document': '12345678901',
+            })
+            self.assertEqual(response.status_code, 403)
+            reserve.assert_not_awaited()
+
+        with patch.object(wallet, 'current_user', new=AsyncMock(return_value=self.user)), patch.object(wallet, 'create_withdrawal_request', new=AsyncMock()) as reserve, patch.dict(os.environ, {'WITHDRAWALS_ENABLED': 'true', 'PAYMENT_PROVIDER': 'amplopay', 'BACKEND_PUBLIC_URL': '', 'RENDER_EXTERNAL_URL': ''}):
             response = self.client.post('/api/wallet/withdrawals', json={
                 'amount': 20, 'pix_key': 'player@example.test', 'pix_key_type': 'email',
                 'owner_name': 'Player Test', 'owner_document': '12345678901',

@@ -885,6 +885,8 @@ Esse valor nao "volta" para Amplopay automaticamente. Ele ja esta representado c
 
 ### Saque do usuario
 
+Status atual do teste fechado: saque de usuario fica pausado com `WITHDRAWALS_ENABLED=false` no backend e `VITE_WITHDRAWALS_ENABLED` ausente ou diferente de `true` no frontend. O usuario ainda consegue abrir o modal e preencher os dados, mas o botao de solicitar saque fica desabilitado. O backend tambem bloqueia `POST /api/wallet/withdrawals` enquanto a flag estiver desligada.
+
 Fluxo:
 
 1. Usuario solicita saque no lobby.
@@ -1345,12 +1347,14 @@ AMPLOPAY_PUBLIC_KEY=...
 AMPLOPAY_SECRET_KEY=...
 AMPLOPAY_REQUIRE_WEBHOOK_TOKEN=true
 REQUIRE_WALLET_LEDGER=true
+WITHDRAWALS_ENABLED=false
 ```
 
 Recomendacao:
 
 - Em teste pode usar `REQUIRE_WALLET_LEDGER=false`.
 - Para producao, usar `REQUIRE_WALLET_LEDGER=true` depois de confirmar que a RPC do Supabase esta funcionando.
+- Durante teste fechado, manter `WITHDRAWALS_ENABLED=false` para permitir deposito e bloquear saque de usuario.
 
 ### Frontend - Vercel
 
@@ -1359,12 +1363,14 @@ Obrigatorias:
 ```text
 VITE_API_URL=https://seu-backend.onrender.com
 VITE_WS_URL=wss://seu-backend.onrender.com/ws/game
+VITE_WITHDRAWALS_ENABLED=false
 ```
 
 Observacao:
 
 - Nao colocar nenhuma chave secreta no Vercel frontend.
 - Variaveis `VITE_*` ficam expostas no bundle do navegador.
+- Durante teste fechado, manter `VITE_WITHDRAWALS_ENABLED=false` ou nao configurar essa variavel.
 
 ---
 

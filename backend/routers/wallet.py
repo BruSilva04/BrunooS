@@ -91,6 +91,10 @@ def payment_provider() -> str:
     return os.getenv("PAYMENT_PROVIDER", "sandbox").strip().lower() or "sandbox"
 
 
+def withdrawals_enabled() -> bool:
+    return os.getenv("WITHDRAWALS_ENABLED", "false").strip().lower() == "true"
+
+
 def account_payment_provider(user: dict) -> str:
     if is_demo_user(user):
         return "sandbox"
@@ -353,6 +357,9 @@ async def withdrawal_request(
     authorization: str | None = Header(default=None),
 ):
     user = await current_user(authorization)
+    if not withdrawals_enabled():
+        raise HTTPException(status_code=403, detail="Saques estao temporariamente indisponiveis.")
+
     provider = account_payment_provider(user)
     if provider not in {"sandbox", "amplopay"}:
         raise HTTPException(status_code=501, detail=f"Provider {provider} nao suportado")
