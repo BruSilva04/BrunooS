@@ -92,7 +92,7 @@ export default class GameScene extends Phaser.Scene {
     this.totalClears = 0;
     this.bestCombo = 0;
     this.moves = 0;
-    this.difficultyTier = difficultyTierFor();
+    this.difficultyTier = difficultyTierFor({ demoMode: this.demoMode });
     this.cashoutUnlocked = false;
     this.gameState = GAME_STATE.STARTING;
     this.resultShown = false;
@@ -448,10 +448,12 @@ export default class GameScene extends Phaser.Scene {
     this.difficultyTier = difficultyTierFor({
       totalClears: this.totalClears,
       moves: this.moves,
+      demoMode: this.demoMode,
     });
     this.availablePieces = generateThreePieces({
       board: this.board,
       difficultyTier: this.difficultyTier,
+      demoMode: this.demoMode,
     });
     this._renderPieces();
     return this.availablePieces.length > 0 && hasAnyMove(this.board, this.availablePieces);
@@ -640,7 +642,7 @@ export default class GameScene extends Phaser.Scene {
   }
 
   _afterMove() {
-    this.difficultyTier = difficultyTierFor({ totalClears: this.totalClears, moves: this.moves });
+    this.difficultyTier = difficultyTierFor({ totalClears: this.totalClears, moves: this.moves, demoMode: this.demoMode });
     if (!this.cashoutUnlocked && this.totalClears >= BLOCK_GAME_CONFIG.clearsToUnlockCashout) {
       this.cashoutUnlocked = true;
       this.gameState = GAME_STATE.CASHOUT_AVAILABLE;
@@ -944,7 +946,7 @@ export default class GameScene extends Phaser.Scene {
     const body = this.add.text(W / 2, py + 142, [
       'Arraste as pecas para o tabuleiro.',
       'Complete linhas ou colunas para limpar.',
-      'Novas peças podem chegar sem encaixe.',
+      this.demoMode ? 'Demo com peças simples e nível fácil.' : 'Novas peças podem chegar sem encaixe.',
       `Após ${BLOCK_GAME_CONFIG.clearsToUnlockCashout} limpezas, o resgate aparece.`,
       'Se nenhuma peca couber, a rodada termina.',
     ].join('\n'), {

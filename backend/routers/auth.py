@@ -15,7 +15,7 @@ from db.database import (
     rollover_status,
 )
 from services.auth import create_session_token, hash_password, verify_password, verify_session_token
-from services.account_mode import is_demo_user
+from services.account_mode import account_balance, is_demo_user
 
 router = APIRouter(prefix="/api", tags=["auth"])
 RATE_LIMIT_BUCKETS: dict[str, list[float]] = {}
@@ -93,7 +93,7 @@ def public_user(user: dict) -> dict:
         "permissions": user.get("permissions", {}),
         "referral_code": user.get("referral_code") or "",
         "acquisition_campaign_id": user.get("acquisition_campaign_id"),
-        "balance": float(user.get("balance", 0) or 0),
+        "balance": account_balance(user),
         "bonus_balance": float(user.get("bonus_balance", 0) or 0),
         "rollover": rollover_status(user),
     }

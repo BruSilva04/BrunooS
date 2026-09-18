@@ -156,7 +156,8 @@ export function hasAnyMove(board, availablePieces) {
     .some((piece) => !piece.used && hasValidPlacement(board, piece));
 }
 
-export function difficultyTierFor({ totalClears = 0, moves = 0 } = {}) {
+export function difficultyTierFor({ totalClears = 0, moves = 0, demoMode = false } = {}) {
+  if (demoMode === true) return 1;
   const { startTier, movesPerTier, clearsPerTier } = BLOCK_GAME_CONFIG.difficulty;
   return Math.min(4, startTier + Math.max(
     Math.floor(moves / movesPerTier), Math.floor(totalClears / clearsPerTier),
@@ -191,7 +192,15 @@ function pickFromPool(pool, rng) {
   return pool[pool.length - 1];
 }
 
-export function generateThreePieces({ board, difficultyTier = difficultyTierFor(), rng = Math.random } = {}) {
+export function generateThreePieces({ board, difficultyTier = difficultyTierFor(), demoMode = false, rng = Math.random } = {}) {
+  // The server authorizes admin demo mode before the scene generates pieces.
+  // Keep demo batches simple and playable without the real game's size bias.
+  if (demoMode === true) {
+    const fitting = PIECE_DEFS.filter((piece) => piece.tier === 1 && hasValidPlacement(board, piece));
+    if (!fitting.length) return [];
+    return Array.from({ length: BLOCK_GAME_CONFIG.piecesPerBatch }, () =>
+      makePiece(fitting[Math.floor(rng() * fitting.length)]));
+  }
   const tier = Math.max(BLOCK_GAME_CONFIG.difficulty.startTier, Math.min(4, difficultyTier));
   const pool = poolForTier(tier);
   const blocked = pool.filter((piece) => !hasValidPlacement(board, piece));

@@ -24,13 +24,38 @@ class LobbyHistory(unittest.IsolatedAsyncioTestCase):
             snapshot = await get_lobby_snapshot('owner-id')
         client.rpc.assert_called_once_with('read_lobby_snapshot', {'p_user_id': 'owner-id'})
         client.table.assert_not_called()
-        self.assertEqual(snapshot['balance'], 154)
+        self.assertEqual(snapshot['balance'], 100)
+        self.assertEqual(snapshot['user']['balance'], 100)
+        self.assertEqual(user['balance'], 154)
         self.assertTrue(snapshot['demo_history_available'])
         self.assertEqual(snapshot['stats']['rounds'], 2)
         self.assertEqual([row['round_id'] for row in snapshot['history']], ['demo', 'real'])
         self.assertEqual([row['payout'] for row in snapshot['history']], [54, -30])
         self.assertEqual([row['demo_mode'] for row in snapshot['history']], [True, False])
         self.assertEqual(snapshot['active_block_round']['round_id'], 'pending')
+
+    async def test_lobby_refresh_uses_current_permissions_and_keeps_demo_credit_fixed(self):
+        client = MagicMock()
+        cases = [
+            ('owner', 'admin', 0, 100, True),
+            ('owner', 'admin', 100000, 100, True),
+            ('owner', 'player', 37.5, 37.5, False),
+            ('other-admin', 'admin', 37.5, 37.5, False),
+            ('player', 'player', 37.5, 37.5, False),
+        ]
+        for username, role, stored_balance, expected_balance, expected_demo in cases:
+            with self.subTest(username=username, role=role, stored_balance=stored_balance):
+                user = {'id': 'user-id', 'username': username, 'role': role,
+                        'email': 'user@example.test', 'balance': stored_balance, 'demo_mode': True}
+                client.rpc.return_value.execute.return_value = SimpleNamespace(data={'user': user, 'rounds': []})
+                with patch('db.database.get_supabase_client', return_value=client), patch.dict(os.environ, {'ADMIN_USERNAME': 'owner'}):
+                    snapshot = await get_lobby_snapshot('user-id')
+                self.assertEqual(snapshot['balance'], expected_balance)
+                self.assertEqual(snapshot['user']['balance'], expected_balance)
+                self.assertEqual(snapshot['demo_mode'], expected_demo)
+                self.assertEqual(snapshot['user']['demo_mode'], expected_demo)
+                self.assertEqual(user['balance'], stored_balance)
+        client.table.assert_not_called()
 
     async def test_missing_user_is_not_replaced_with_empty_fake_account(self):
         client = MagicMock()

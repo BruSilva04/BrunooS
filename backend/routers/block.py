@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from db.block_rounds import call_round_rpc, find_round, save_demo_round
 from db.database import get_user_by_id
 from routers.auth import bearer_token
-from services.account_mode import is_demo_user
+from services.account_mode import account_balance, is_demo_user
 from services.auth import verify_session_token
 from services.block_puzzle import (
     ALLOWED_BETS_CENTS, CASHOUT_CLEARS, apply_move, multiplier_hundredths, new_state, payout_cents,
@@ -129,7 +129,7 @@ async def start_round(payload: StartRequest, authorization: str | None = Header(
     if bet_cents not in ALLOWED_BETS_CENTS:
         raise HTTPException(422, "Valor de aposta inválido.")
     if is_demo_user(user):
-        return {"demo_mode": True, "bet": bet_cents / 100, "balance": float(user.get("balance", 0))}
+        return {"demo_mode": True, "bet": bet_cents / 100, "balance": account_balance(user)}
     seed = generate_server_seed()
     try:
         result = await call_round_rpc("start_block_round", {

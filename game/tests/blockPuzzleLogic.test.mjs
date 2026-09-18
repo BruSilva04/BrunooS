@@ -110,6 +110,36 @@ assert.equal(difficultyTierFor({ totalClears: 6, moves: 0 }), 4);
 assert.equal(difficultyTierFor({ totalClears: 90, moves: 300 }), 4);
 
 {
+  for (const progress of [0, 3, 6, 300]) {
+    assert.equal(difficultyTierFor({ totalClears: progress, moves: progress, demoMode: true }), 1,
+      'admin demo never inherits real difficulty progression');
+  }
+  const board = createEmptyBoard();
+  const offered = new Set();
+  for (let trial = 0; trial < 100; trial += 1) {
+    const pieces = generateThreePieces({ board, difficultyTier: 4, demoMode: true, rng: () => trial / 100 });
+    assert.equal(pieces.length, 3);
+    assert.ok(pieces.every(piece => piece.tier === 1), 'demo only uses simple shapes, even with a stale difficulty tier');
+    pieces.forEach(piece => offered.add(piece.key));
+  }
+  assert.deepEqual(offered, new Set(PIECE_DEFS.filter(piece => piece.tier === 1).map(piece => piece.key)),
+    'demo includes small one- and two-cell pieces');
+}
+
+{
+  const board = Array.from({ length: 8 }, (_, row) => Array.from({ length: 8 }, (_, col) => (row + col) % 2));
+  const before = JSON.stringify(board);
+  for (let trial = 0; trial < 100; trial += 1) {
+    const pieces = generateThreePieces({ board, demoMode: true, rng: () => trial / 100 });
+    assert.equal(pieces.length, 3);
+    assert.ok(pieces.every(piece => hasValidPlacement(board, piece)), 'demo never forces an initially blocked piece');
+  }
+  assert.equal(JSON.stringify(board), before);
+  const full = Array.from({ length: 8 }, () => Array(8).fill(CELL.FILLED));
+  assert.deepEqual(generateThreePieces({ board: full, demoMode: true }), [], 'demo cannot offer a move on a full board');
+}
+
+{
   // A horizontal corridor can fit some shapes, but each rack includes a blocked one.
   const board = Array.from({ length: 8 }, (_, row) => Array.from({ length: 8 }, (_, col) => row === 0 ? 0 : (row + col) % 2));
   for (let trial = 0; trial < 100; trial += 1) {

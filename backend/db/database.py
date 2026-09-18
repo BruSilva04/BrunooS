@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 from postgrest.exceptions import APIError
 from supabase import Client, create_client
 from services.auth import hash_password
-from services.account_mode import is_demo_user
+from services.account_mode import account_balance, is_demo_user
 from services.tracking import (
     date_in_range,
     normalize_referral_code,
@@ -1445,7 +1445,7 @@ async def list_wallet_snapshot(user_id: str) -> dict[str, Any] | None:
     )
 
     return {
-        "balance": float(user.get("balance", 0) or 0),
+        "balance": account_balance(user),
         "bonus_balance": float(user.get("bonus_balance", 0) or 0),
         "rollover": rollover_status(user),
         "transactions": transactions.data or [],
@@ -1525,11 +1525,12 @@ async def get_lobby_snapshot(user_id: str) -> dict[str, Any] | None:
             "has_kyc": bool(user.get("legal_name") and user.get("document")),
             "role": user.get("role", "player"),
             "demo_mode": is_demo_user(user),
+            "balance": account_balance(user),
             "permissions": user.get("permissions", {}),
             "referral_code": user.get("referral_code") or "",
             "acquisition_campaign_id": user.get("acquisition_campaign_id"),
         },
-        "balance": float(user.get("balance", 0) or 0),
+        "balance": account_balance(user),
         "bonus_balance": float(user.get("bonus_balance", 0) or 0),
         "rollover": rollover_status(user),
         "demo_mode": is_demo_user(user),

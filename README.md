@@ -1,6 +1,6 @@
 # Block Rush
 
-Puzzle de blocos com frontend em Phaser/Vite e plataforma de contas em FastAPI/Supabase. **Somente a conta definida em `ADMIN_USERNAME`, com papel ou permissão de administrador, usa modo demo.** Todas as demais contas jogam com o saldo da carteira: a aposta é debitada ao iniciar e o resgate confirmado é creditado pelo servidor.
+Puzzle de blocos com frontend em Phaser/Vite e plataforma de contas em FastAPI/Supabase. **Somente a conta definida em `ADMIN_USERNAME`, com papel ou permissão de administrador, usa modo demo.** Essa conta exibe saldo demonstrativo fixo de R$ 100, sem alterar a carteira real. Todas as demais contas jogam com o saldo da carteira: a aposta é debitada ao iniciar e o resgate confirmado é creditado pelo servidor.
 
 Antes de publicar esta versão, aplique as [migrações de partidas](backend/db/migrations/README.md) no Supabase. Quem já executou `20260912_block_rounds.sql` precisa executar apenas `20260914_block_cashout_history.sql`, que adiciona o histórico demo e a regra de cinco limpezas sem redefinir saldos existentes. Configure `PAYMENT_PROVIDER=amplopay` e as credenciais do provedor para Pix de contas reais; falhas de configuração não habilitam saldo simulado.
 
@@ -37,9 +37,11 @@ As variáveis necessárias estão em `backend/.env.example`. Não publique crede
 
 Linhas e colunas completas desaparecem imediatamente, com efeito visual simultâneo de 110 ms. Nas contas reais, a próxima jogada aguarda a confirmação do servidor. Atualizar a página retoma a rodada ativa sem cobrar outra aposta; repetições de uma mesma ação não duplicam pagamentos. Uma falha de comunicação pausa a partida e permite tentar novamente.
 
-A dificuldade é igual para jogadores e para a demo admin. O primeiro lote começa no nível 2; após três jogadas passa ao nível 3 e após seis ao nível 4, que é o máximo. Limpezas também podem acelerar a progressão. Cada lote contém três formatos diferentes, com peso proporcional ao quadrado do tamanho da peça e ao seu nível, favorecendo peças grandes e complexas, incluindo quadrado 3×3, barra vertical de cinco e retângulo 4×2. O tamanho mínimo é de três blocos no nível 2 e quatro blocos nos níveis 3 e 4.
+A demo do administrador permanece no nível 1, independentemente das jogadas ou limpezas. Seus lotes usam somente peças simples, incluindo peças de um e dois blocos, sorteadas sem favorecer as maiores. Cada peça oferecida cabe no tabuleiro no momento do sorteio; os formatos podem se repetir. A rodada ainda termina se nenhuma peça restante couber após uma jogada.
 
-Quando existe um formato elegível que não cabe no tabuleiro, o novo lote inclui uma dessas peças; uma limpeza pode abrir espaço para ela. O sorteio não repete tentativas para garantir encaixe. Se nenhuma peça do lote couber, a rodada termina, inclusive na demo admin. Rodadas já abertas mantêm as peças recebidas e usam a nova regra a partir dos próximos lotes.
+Para as demais contas, o primeiro lote começa no nível 2; após três jogadas passa ao nível 3 e após seis ao nível 4, que é o máximo. Limpezas também podem acelerar a progressão. Cada lote contém três formatos diferentes, com peso proporcional ao quadrado do tamanho da peça e ao seu nível, favorecendo peças grandes e complexas, incluindo quadrado 3×3, barra vertical de cinco e retângulo 4×2. O tamanho mínimo é de três blocos no nível 2 e quatro blocos nos níveis 3 e 4.
+
+Nas partidas reais, quando existe um formato elegível que não cabe no tabuleiro, o novo lote inclui uma dessas peças; uma limpeza pode abrir espaço para ela. O sorteio não repete tentativas para garantir encaixe. Se nenhuma peça do lote couber, a rodada termina. Rodadas reais já abertas mantêm as regras e peças recebidas.
 
 O botão de resgate aparece após completar cinco linhas ou colunas na mesma partida. Cada linha ou coluna conta uma limpeza, inclusive em combos; trocar o lote de peças não libera o resgate. Frontend, API e transação SQL exigem esse mesmo progresso.
 
@@ -55,7 +57,7 @@ npm test
 npm run build
 ```
 
-Os testes cobrem regras do puzzle, sessões, quebra imediata, resgate após cinco limpezas, sincronização e repetição de resultados demo e transações SQL em PostgreSQL local via PGlite, sem acessar saldos reais. O teste de paridade entre admin e jogadores também exige `python3` no PATH (ou a variável `PYTHON` com o executável), apenas com a biblioteca padrão.
+Os testes cobrem regras do puzzle, separação de dificuldade entre demo e partidas reais, sessões, quebra imediata, resgate após cinco limpezas, sincronização e repetição de resultados demo e transações SQL em PostgreSQL local via PGlite, sem acessar saldos reais. O teste de paridade das regras reais entre JavaScript e Python também exige `python3` no PATH (ou a variável `PYTHON` com o executável), apenas com a biblioteca padrão.
 
 Com as dependências Python instaladas, execute também:
 
@@ -63,6 +65,7 @@ Com as dependências Python instaladas, execute também:
 python backend/tests/test_block_puzzle.py
 python backend/tests/test_lobby_history.py
 python backend/tests/test_wallet_rules.py
+python backend/tests/test_demo_balance.py
 ```
 
 O primeiro verifica regras do servidor e endpoints com banco e pagamentos simulados, incluindo a exclusividade da conta demo.

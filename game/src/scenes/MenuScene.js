@@ -36,7 +36,7 @@ export default class MenuScene extends Phaser.Scene {
 
   _drawHeader() {
     this._button(62, 38, 88, 36, '‹ LOBBY', false, () => this.scene.start('Lobby'));
-    this.add.text(W - 22, 25, 'SALDO DA CONTA', {
+    this.add.text(W - 22, 25, this.demoMode ? 'SALDO DEMO' : 'SALDO DA CONTA', {
       fontFamily: 'Arial, sans-serif', fontSize: '9px', color: '#a3aecb',
     }).setOrigin(1, 0);
     this.add.text(W - 22, 41, this._money(state.balance), {
@@ -138,7 +138,7 @@ export default class MenuScene extends Phaser.Scene {
     this._refreshPlayLabel();
     this.add.text(W / 2, 593, [
       'Arraste as peças e complete linhas ou colunas.',
-      'Novas sequências podem trazer peças sem encaixe.',
+      this.demoMode ? 'Demo com peças simples e nível fácil.' : 'Novas sequências podem trazer peças sem encaixe.',
       'Complete 5 linhas ou colunas para liberar o resgate.',
     ], {
       fontSize: '12px', fontFamily: 'Arial, sans-serif', color: '#a3aecb',

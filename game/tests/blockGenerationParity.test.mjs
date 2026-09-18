@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { PIECE_DEFS, createEmptyBoard, difficultyTierFor, generateThreePieces, hasAnyMove } from '../src/block/BlockPuzzleLogic.js';
 
-// Compare the real Python generator with the admin's JavaScript generator.
+// Compare real-game rules in Python and JavaScript; the admin demo is separate.
 // Fixed random draws make differences in shapes, weights, order or levels visible.
 // Only Python's standard library is needed; no database or network is involved.
 const checkerboard = Array.from({ length: 8 }, (_, row) => Array.from({ length: 8 }, (_, col) => (row + col) % 2));
@@ -40,6 +40,6 @@ cases.forEach((test, index) => {
   const tier = difficultyTierFor({ moves: test.moves, totalClears: test.total_clears });
   let cursor = 0;
   const pieces = generateThreePieces({ board: test.board, difficultyTier: tier, rng: () => test.draws[cursor++] });
-  assert.deepEqual({ tier, pieces: pieces.map(({ key, tier, coords, color, used }) => ({ key, tier, coords, color, used })), can_play: hasAnyMove(test.board, pieces) }, backend.cases[index], `admin/player generation differs in case ${index}`);
+  assert.deepEqual({ tier, pieces: pieces.map(({ key, tier, coords, color, used }) => ({ key, tier, coords, color, used })), can_play: hasAnyMove(test.board, pieces) }, backend.cases[index], `real-game generation differs in case ${index}`);
 });
-console.log(`Block generation parity: ${cases.length} scenarios match between admin and real accounts`);
+console.log(`Block generation parity: ${cases.length} real-game scenarios match between JavaScript and Python`);

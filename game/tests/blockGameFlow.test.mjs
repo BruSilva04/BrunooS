@@ -44,12 +44,13 @@ function object() {
 }
 function scene(demo = false) {
   config.state.demoMode = demo;
-  config.state.balance = 70;
+  config.state.balance = demo ? 100 : 70;
   const game = new GameScene();
   game.init({ bet: 30 });
   game.roundId = 'round-test';
   game.gameState = 'PLAYING';
   game.sounds = object();
+  game.cameras = { main: object() };
   game.add = { rectangle: object, graphics: object, container: object, zone: object };
   game.clearLayer = object();
   game.ghostGfx = object();
@@ -67,7 +68,7 @@ function scene(demo = false) {
 function snapshot(overrides = {}) {
   return { demo_mode: false, round_id: 'round-test', version: 1, bet: 30, balance: 70,
     status: 'active', board: logic.createEmptyBoard(), pieces: [], moves: 1, total_clears: 1,
-    best_combo: 1, difficulty_tier: 1, cashout_unlocked: false, payout: 0, ...overrides };
+    best_combo: 1, difficulty_tier: 2, cashout_unlocked: false, payout: 0, ...overrides };
 }
 function prepareClear(game) {
   game.board[0].fill(1);
@@ -87,7 +88,7 @@ assert.equal(demo.animations.length, 1, 'all cells flash together');
 assert.equal(demo.animations[0].targets.length, 15, 'intersection flashes only once');
 assert.ok(demo.animations[0].duration <= 120);
 assert.equal(demo.animations[0].delay, undefined, 'no per-cell stagger');
-assert.equal(config.state.balance, 70, 'demo never modifies wallet balance');
+assert.equal(config.state.balance, 100, 'demo moves leave the simulated balance at 100');
 
 const cashoutUI = scene(true);
 for (const name of ['cashoutGfx', 'cashoutLabel', 'cashoutZone', 'cashoutSub']) {
@@ -110,6 +111,7 @@ assert.equal(cashoutUI.cashoutGfx.visible, true);
 assert.equal(cashoutUI.cashoutZone.input.enabled, true);
 cashoutUI._cashOut();
 assert.equal(cashoutUI.won, true);
+assert.equal(config.state.balance, 100, 'demo cashout does not credit the displayed balance');
 
 const blockedDemo = scene(true);
 blockedDemo.board = Array.from({ length: 8 }, (_, row) => Array.from({ length: 8 }, (_, col) => (row + col) % 2));
@@ -117,11 +119,24 @@ blockedDemo.moves = 2;
 blockedDemo.availablePieces = [{ id: 'last', coords: [[0, 0]], used: false, color: 1 }];
 blockedDemo._gameOver = () => { blockedDemo.resultShown = true; blockedDemo.gameState = 'GAME_OVER'; };
 blockedDemo._placePiece(blockedDemo.availablePieces[0], 0, 0, { container: object() });
-assert.equal(blockedDemo.difficultyTier, 3, 'admin difficulty increases on the next batch');
+assert.equal(blockedDemo.difficultyTier, 1, 'admin difficulty remains easy on the next batch');
 assert.equal(blockedDemo.availablePieces.length, 3);
-assert.equal(logic.hasAnyMove(blockedDemo.board, blockedDemo.availablePieces), false);
-assert.equal(blockedDemo.gameState, 'GAME_OVER', 'admin also loses when new shapes cannot fit');
-assert.equal(config.state.balance, 70, 'harder admin rounds still use demo accounting');
+assert.ok(blockedDemo.availablePieces.every(piece => logic.hasValidPlacement(blockedDemo.board, piece)));
+assert.equal(blockedDemo.gameState, 'PLAYING', 'demo gets small fitting shapes instead of the blocked real-game batch');
+assert.equal(config.state.balance, 100);
+blockedDemo.moves = 300;
+blockedDemo.totalClears = 90;
+blockedDemo._generateBatch();
+assert.equal(blockedDemo.difficultyTier, 1, 'later demo batches stay easy');
+assert.ok(blockedDemo.availablePieces.every(piece => piece.tier === 1));
+
+const noMoveDemo = scene(true);
+noMoveDemo.board = blockedDemo.board.map(row => row.slice());
+const remaining = { id: 'h2', coords: [[0, 0], [0, 1]], used: false, color: 1 };
+noMoveDemo.availablePieces = [remaining];
+noMoveDemo._afterMove();
+assert.equal(noMoveDemo.gameState, 'GAME_OVER', 'demo still ends when remaining pieces cannot fit');
+assert.equal(config.state.balance, 100, 'demo loss does not debit the displayed balance');
 
 const real = scene();
 const pending = deferred();
@@ -159,10 +174,22 @@ assert.equal(config.state.balance, 134.8);
 assert.equal(config.state.activeBlockRound, null);
 
 const starting = scene(true); // A stale local demo flag cannot authorize a demo.
-start = async () => snapshot();
+const hardPieces = logic.generateThreePieces({ board: logic.createEmptyBoard(), difficultyTier: 4, rng: () => 0.99 });
+start = async () => snapshot({ difficulty_tier: 4, pieces: hardPieces });
 await starting._startRound();
 assert.equal(starting.demoMode, false);
 assert.equal(starting.roundId, 'round-test');
+assert.equal(starting.difficultyTier, 4, 'players retain the difficulty confirmed by the server');
+assert.equal(starting.availablePieces, hardPieces, 'players use server pieces even with a stale local demo flag');
+assert.equal(config.state.balance, 70, 'players retain their real balance');
+
+const admin = scene(false);
+start = async () => ({ demo_mode: true, bet: 30, balance: 100 });
+await admin._startRound();
+assert.equal(admin.demoMode, true, 'only the server response enables demo gameplay');
+assert.equal(admin.difficultyTier, 1);
+assert.ok(admin.availablePieces.every(piece => piece.tier === 1));
+assert.equal(config.state.balance, 100, 'admin uses the simulated balance returned by the server');
 const unavailable = scene(false);
 start = async () => { throw new Error('service unavailable'); };
 await unavailable._startRound();

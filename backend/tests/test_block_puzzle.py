@@ -153,8 +153,14 @@ class BlockAPI(unittest.TestCase):
     def test_admin_start_does_not_touch_wallet_or_rounds(self):
         self.user.update(username='owner', role='admin')
         with patch.dict(os.environ, {"ADMIN_USERNAME": "owner"}):
-            response = self.post('/rounds', {"request_id": str(uuid4()), "bet": 30})
-        self.assertTrue(response.json()["demo_mode"])
+            for stored_balance in (0, 154, 100000):
+                with self.subTest(stored_balance=stored_balance):
+                    self.user['balance'] = stored_balance
+                    response = self.post('/rounds', {"request_id": str(uuid4()), "bet": 30})
+                    self.assertEqual(response.status_code, 200)
+                    self.assertTrue(response.json()["demo_mode"])
+                    self.assertEqual(response.json()["balance"], 100)
+                    self.assertEqual(self.user['balance'], stored_balance)
         block.call_round_rpc.assert_not_awaited()
         block.find_round.assert_not_awaited()
 
@@ -163,6 +169,8 @@ class BlockAPI(unittest.TestCase):
         with patch.dict(os.environ, {"ADMIN_USERNAME": "owner"}):
             response = self.post('/rounds', {"request_id": str(uuid4()), "bet": 30})
         self.assertFalse(response.json()["demo_mode"])
+        self.assertEqual(response.json()["balance"], 70)
+        self.assertEqual(block.call_round_rpc.call_args.args[0], 'start_block_round')
 
     def test_invalid_move_does_not_change_persisted_round(self):
         response = self.post(f'/rounds/{self.round_id}/moves', {"action_id": str(uuid4()), "version": 0, "piece_id": "forged", "row": 0, "col": 0})
