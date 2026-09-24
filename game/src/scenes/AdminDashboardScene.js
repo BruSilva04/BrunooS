@@ -20,6 +20,9 @@ export default class AdminDashboardScene extends Phaser.Scene {
     this.loading = true;
     this.error = '';
     this.message = '';
+    this.creating = false;
+    this.createdCampaign = null;
+    this.loadVersion = 0;
     this.affiliates = [];
     this.campaigns = [];
     this.report = { overview: {}, rows: [] };
@@ -63,8 +66,10 @@ export default class AdminDashboardScene extends Phaser.Scene {
     `;
   }
 
-  async _load() {
-    this.loading = true;
+  async _load({ background = false } = {}) {
+    const mountedRoot = this.root;
+    const version = ++this.loadVersion;
+    if (!background) this.loading = true;
     this.error = '';
     try {
       const [affiliatesData, campaignsData, report] = await Promise.all([
@@ -72,10 +77,12 @@ export default class AdminDashboardScene extends Phaser.Scene {
         listAdminCampaigns(),
         fetchAdminAcquisitionCampaigns(this._activeFilters()),
       ]);
+      if (this.root !== mountedRoot || version !== this.loadVersion) return;
       this.affiliates = affiliatesData.affiliates || [];
       this.campaigns = campaignsData.campaigns || [];
       this.report = report || { overview: {}, rows: [] };
     } catch (error) {
+      if (this.root !== mountedRoot || version !== this.loadVersion) return;
       this.error = error.message || 'Falha ao carregar painel admin.';
       if (error.status === 401) {
         clearSession();
@@ -83,8 +90,10 @@ export default class AdminDashboardScene extends Phaser.Scene {
         return;
       }
     } finally {
-      this.loading = false;
-      this._render();
+      if (this.root === mountedRoot && version === this.loadVersion) {
+        this.loading = false;
+        this._render();
+      }
     }
   }
 
@@ -118,6 +127,7 @@ export default class AdminDashboardScene extends Phaser.Scene {
 
         ${this.error ? `<section class="admin-alert error">${this._escape(this.error)}</section>` : ''}
         ${this.message ? `<section class="admin-alert">${this._escape(this.message)}</section>` : ''}
+        ${this._createdCampaignHtml()}
 
         ${this._filtersHtml()}
         ${this._kpisHtml(overview)}
@@ -199,13 +209,20 @@ export default class AdminDashboardScene extends Phaser.Scene {
   _affiliateFormHtml() {
     return `
       <section class="admin-card">
-        <h2>Criar influenciador</h2>
+        <h2>Criar influenciadora e link</h2>
+        <p class="form-help">Cria a primeira campanha e seu link de divulgação. O link mede resultados e não gera comissão automática.</p>
         <form data-form="affiliate">
           <input name="name" placeholder="Nome" required maxlength="120" />
           <input name="handle" placeholder="@handle" maxlength="80" />
           <input name="contact" placeholder="Contato" maxlength="180" />
+          <label>Primeira campanha
+            <input name="campaign_name" placeholder="Divulgação inicial" maxlength="160" />
+          </label>
+          <label>Custo da campanha (R$)
+            <input name="media_cost" type="number" step="0.01" min="0" value="0" />
+          </label>
           <textarea name="notes" placeholder="Observacoes" maxlength="1000"></textarea>
-          <button type="submit">Criar influenciador</button>
+          <button type="submit" ${this.creating ? 'disabled' : ''}>Criar e gerar link</button>
         </form>
       </section>
     `;
@@ -214,14 +231,15 @@ export default class AdminDashboardScene extends Phaser.Scene {
   _campaignFormHtml() {
     return `
       <section class="admin-card">
-        <h2>Criar campanha</h2>
+        <h2>Nova campanha para influenciadora</h2>
+        <p class="form-help">Cada campanha recebe seu próprio link. Use outra campanha para medir uma nova divulgação separadamente.</p>
         <form data-form="campaign">
           <select name="affiliate_id" required>
             <option value="">Influenciador</option>
             ${this.affiliates.map((item) => `<option value="${this._escape(item.id)}">${this._escape(item.name)}</option>`).join('')}
           </select>
           <input name="name" placeholder="Nome da campanha" required maxlength="160" />
-          <input name="referral_code" placeholder="Referral code. Ex: JULIANA" required maxlength="40" />
+          <input name="referral_code" placeholder="Código do link (opcional, gerado automaticamente)" maxlength="40" />
           <input name="media_cost" type="number" step="0.01" min="0" placeholder="Custo de midia" />
           <div class="date-row">
             <input name="starts_at" type="date" />
@@ -232,7 +250,7 @@ export default class AdminDashboardScene extends Phaser.Scene {
             <option value="paused">Pausada</option>
             <option value="archived">Arquivada</option>
           </select>
-          <button type="submit">Criar campanha</button>
+          <button type="submit" ${this.creating ? 'disabled' : ''}>Criar campanha e link</button>
         </form>
       </section>
     `;
@@ -275,6 +293,24 @@ export default class AdminDashboardScene extends Phaser.Scene {
     `;
   }
 
+  _createdCampaignHtml() {
+    if (!this.createdCampaign?.campaign?.referral_code) return '';
+    const { campaign, affiliate } = this.createdCampaign;
+    const link = this._campaignLink(campaign.referral_code);
+    return `
+      <section class="admin-card share-card" role="status">
+        <h2>Link pronto para divulgar</h2>
+        <p>${this._escape(affiliate?.name || '')} · ${this._escape(campaign.name)}</p>
+        <label>Link da campanha
+          <input class="share-link" readonly value="${this._escape(link)}" aria-label="Link da campanha para copiar" />
+        </label>
+        <button type="button" data-action="copy-link" data-link="${this._escape(link)}">Copiar link para o status</button>
+        <p class="form-help">Os cliques, cadastros e depósitos atribuídos aparecem nesta campanha. Não há comissão pelo link.</p>
+        ${campaign.status !== 'active' ? '<p class="form-help">Ative a campanha antes de divulgar: campanhas pausadas ou arquivadas não registram novos cliques.</p>' : ''}
+      </section>
+    `;
+  }
+
   _campaignRowHtml(row) {
     const campaign = row.campaign || {};
     const affiliate = row.affiliate || {};
@@ -288,7 +324,7 @@ export default class AdminDashboardScene extends Phaser.Scene {
         </td>
         <td>
           <button type="button" class="link-btn" data-action="copy-link" data-link="${this._escape(link)}">Copiar</button>
-          <small>${this._escape(this._campaignUtmExample(campaign.referral_code))}</small>
+          <small>${this._escape(link)}</small>
         </td>
         <td>${this._num(row.clicks_total)} / ${this._num(row.unique_clicks)}</td>
         <td>${this._num(row.signups)}</td>
@@ -321,60 +357,92 @@ export default class AdminDashboardScene extends Phaser.Scene {
         await this._copyText(button.dataset.link || '');
       });
     });
+    this.root.querySelector('.share-link')?.addEventListener('click', (event) => event.currentTarget.select());
     this.root.querySelector('[data-form="affiliate"]')?.addEventListener('submit', (event) => this._submitAffiliate(event));
     this.root.querySelector('[data-form="campaign"]')?.addEventListener('submit', (event) => this._submitCampaign(event));
   }
 
   async _submitAffiliate(event) {
     event.preventDefault();
+    if (this.creating) return;
+    this.creating = true;
+    const mountedRoot = this.root;
     const form = event.currentTarget;
+    form.querySelector('button[type="submit"]').disabled = true;
     const values = Object.fromEntries(new FormData(form).entries());
     try {
-      await createAdminAffiliate({
+      const response = await createAdminAffiliate({
         name: String(values.name || '').trim(),
         handle: String(values.handle || '').trim(),
         contact: String(values.contact || '').trim(),
         notes: String(values.notes || '').trim(),
+        campaign_name: String(values.campaign_name || '').trim() || undefined,
+        media_cost: Number(values.media_cost || 0),
       });
-      this.message = 'Influenciador criado.';
+      if (this.root !== mountedRoot) return;
+      this.createdCampaign = { affiliate: response.affiliate, campaign: response.campaign };
+      this.message = 'Influenciadora e campanha criadas. Seu link está pronto para copiar.';
       form.reset();
-      await this._load();
-    } catch (error) {
-      this.error = error.message || 'Falha ao criar influenciador.';
+      this.loading = false;
       this._render();
+      this._load({ background: true });
+    } catch (error) {
+      if (this.root !== mountedRoot) return;
+      this.error = error.message || 'Falha ao criar influenciador.';
+    } finally {
+      if (this.root === mountedRoot) {
+        this.creating = false;
+        this._render();
+      }
     }
   }
 
   async _submitCampaign(event) {
     event.preventDefault();
+    if (this.creating) return;
+    this.creating = true;
+    const mountedRoot = this.root;
     const form = event.currentTarget;
+    form.querySelector('button[type="submit"]').disabled = true;
     const values = Object.fromEntries(new FormData(form).entries());
     try {
       const response = await createAdminCampaign({
         affiliate_id: String(values.affiliate_id || ''),
         name: String(values.name || '').trim(),
-        referral_code: String(values.referral_code || '').trim(),
+        referral_code: String(values.referral_code || '').trim() || undefined,
         media_cost: Number(values.media_cost || 0),
         starts_at: values.starts_at || null,
         ends_at: values.ends_at || null,
         status: values.status || 'active',
       });
-      const code = response.campaign?.referral_code || values.referral_code;
-      this.message = `Campanha criada: ${this._campaignLink(code)} | UTM: ${this._campaignUtmExample(code)}`;
+      if (this.root !== mountedRoot) return;
+      this.createdCampaign = { campaign: response.campaign,
+        affiliate: this.affiliates.find(item => item.id === response.campaign?.affiliate_id) };
+      this.message = 'Campanha criada. Copie o link para acompanhar esta divulgação.';
       form.reset();
-      await this._load();
-    } catch (error) {
-      this.error = error.message || 'Falha ao criar campanha.';
+      this.loading = false;
       this._render();
+      this._load({ background: true });
+    } catch (error) {
+      if (this.root !== mountedRoot) return;
+      this.error = error.message || 'Falha ao criar campanha.';
+    } finally {
+      if (this.root === mountedRoot) {
+        this.creating = false;
+        this._render();
+      }
     }
   }
 
   async _copyText(text) {
+    const mountedRoot = this.root;
     try {
       await navigator.clipboard.writeText(text);
+      if (this.root !== mountedRoot) return;
       this.message = `Link copiado: ${text}`;
     } catch {
-      this.message = text;
+      if (this.root !== mountedRoot) return;
+      this.message = `Copie este link: ${text}`;
     }
     this._render();
   }
@@ -437,11 +505,6 @@ export default class AdminDashboardScene extends Phaser.Scene {
   _campaignLink(referralCode) {
     const code = String(referralCode || '').trim();
     return `${window.location.origin}/?ref=${encodeURIComponent(code)}`;
-  }
-
-  _campaignUtmExample(referralCode) {
-    const code = String(referralCode || '').trim();
-    return `?ref=${encodeURIComponent(code)}&utm_source=instagram&utm_medium=story&utm_campaign=lancamento_${BRAND.slug.replace(/-/g, '_')}`;
   }
 
   _money(value) {
@@ -554,6 +617,12 @@ export default class AdminDashboardScene extends Phaser.Scene {
           font: 900 12px/1 "Arial Black", Arial, sans-serif;
           cursor: pointer;
         }
+        button:disabled { opacity: 0.6; cursor: wait; }
+        .form-help { color: #a3aecb; font-size: 12px; line-height: 1.5; margin: 0 0 12px; }
+        .share-card { display: grid; gap: 10px; min-width: 0; }
+        .share-card p { margin: 0; overflow-wrap: anywhere; }
+        .share-card button { justify-self: start; }
+        .share-link { text-transform: none; }
         .admin-alert {
           padding: 12px 14px;
           color: #80ffd7;

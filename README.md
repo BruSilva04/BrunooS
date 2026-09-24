@@ -2,7 +2,7 @@
 
 Puzzle de blocos com frontend em Phaser/Vite e plataforma de contas em FastAPI/Supabase. **Somente a conta definida em `ADMIN_USERNAME`, com papel ou permissão de administrador, usa modo demo.** Essa conta exibe saldo demonstrativo fixo de R$ 100, sem alterar a carteira real. Todas as demais contas jogam com o saldo da carteira: a aposta é debitada ao iniciar e o resgate confirmado é creditado pelo servidor.
 
-Antes de publicar esta versão, aplique as [migrações de partidas](backend/db/migrations/README.md) no Supabase. Quem já executou `20260912_block_rounds.sql` precisa executar apenas `20260914_block_cashout_history.sql`, que adiciona o histórico demo e a regra de cinco limpezas sem redefinir saldos existentes. Configure `PAYMENT_PROVIDER=amplopay` e as credenciais do provedor para Pix de contas reais; falhas de configuração não habilitam saldo simulado.
+Antes de publicar esta versão, aplique as [migrações do banco](backend/db/migrations/README.md) no Supabase. Quem já executou `20260912_block_rounds.sql` precisa executar `20260914_block_cashout_history.sql`, que adiciona o histórico demo e a regra de cinco limpezas sem redefinir saldos existentes. Para a criação automática da influenciadora com a primeira campanha, aplique também `20260923_affiliate_campaign.sql` antes de publicar o backend. Configure `PAYMENT_PROVIDER=amplopay` e as credenciais do provedor para Pix de contas reais; falhas de configuração não habilitam saldo simulado.
 
 Durante o teste fechado, depósitos continuam habilitados e saques de clientes ficam pausados por padrão com `WITHDRAWALS_ENABLED=false` no backend e `VITE_WITHDRAWALS_ENABLED` ausente ou diferente de `true` no frontend. O modal de saque permanece visível, mas o botão de solicitar saque fica desabilitado. O backend também bloqueia `POST /api/wallet/withdrawals` com 403 enquanto a flag não for alterada para `true`.
 
@@ -69,3 +69,11 @@ python backend/tests/test_demo_balance.py
 ```
 
 O primeiro verifica regras do servidor e endpoints com banco e pagamentos simulados, incluindo a exclusividade da conta demo.
+
+## Cadastro e campanhas de influenciadoras
+
+Após um novo cadastro, o primeiro acesso ao lobby abre uma sugestão de depósito de **R$ 40**. A pessoa pode fechar o pop-up; o Pix só é gerado ao escolher um valor. A sugestão não se repete depois de exibida, usa um marcador por conta no navegador e não aparece no demo/admin.
+
+No painel de aquisição, **Criar influenciadora e link** cadastra a influenciadora e sua primeira campanha juntas. O nome da campanha é opcional (padrão: “Divulgação inicial”) e o investimento pode ser informado para acompanhar o resultado. O link aparece pronto para copiar, no formato `https://SEU-DOMINIO/?ref=CODIGO`. Cada nova divulgação pode ter uma campanha e um link diferentes para a mesma influenciadora.
+
+O link associa cliques, cadastros e depósitos pagos à campanha; não concede comissão, bônus nem saldo à influenciadora. A origem segue o primeiro clique válido guardado por até 30 dias no navegador. Aplique a [migração incremental](backend/db/migrations/20260923_affiliate_campaign.sql) no SQL Editor do Supabase antes do deploy; ela preserva dados e saldos existentes. Não reaplique o `schema.sql` em um banco já utilizado.

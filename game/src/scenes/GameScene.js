@@ -118,6 +118,11 @@ export default class GameScene extends Phaser.Scene {
     this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => this._cleanup());
   }
 
+  _text(x, y, value, style) {
+    // Phaser Text defaults to a 1x texture even on high-density screens.
+    return this.add.text(x, y, value, { resolution: 3, ...style });
+  }
+
   _syncViewport() {
     if (document.activeElement && document.activeElement.blur) {
       document.activeElement.blur();
@@ -182,51 +187,56 @@ export default class GameScene extends Phaser.Scene {
     panel.lineStyle(1, THEME.primary, 0.38);
     panel.strokeRoundedRect(12, 12, W - 24, 90, 10);
 
-    this.add.text(28, 24, 'SALDO', {
-      fontSize: '10px',
-      fontFamily: '"Arial Black", Arial, sans-serif',
-      color: '#a3aecb',
+    this._text(28, 24, 'SALDO', {
+      fontSize: '11px',
+      fontFamily: 'Arial, sans-serif',
+      fontStyle: 'bold',
+      color: '#b8c4df',
     });
-    this.balanceText = this.add.text(28, 40, money(state.balance), {
-      fontSize: '17px',
-      fontFamily: '"Arial Black", Arial, sans-serif',
+    this.balanceText = this._text(28, 40, money(state.balance), {
+      fontSize: '16px',
+      fontFamily: 'Arial, sans-serif',
+      fontStyle: 'bold',
       color: '#f4f7ff',
     });
 
-    this.betCaption = this.add.text(W - 28, 24, '', {
-      fontSize: '10px',
-      fontFamily: '"Arial Black", Arial, sans-serif',
-      color: '#a3aecb',
+    this.betCaption = this._text(W - 28, 24, '', {
+      fontSize: '11px',
+      fontFamily: 'Arial, sans-serif',
+      fontStyle: 'bold',
+      color: '#b8c4df',
     }).setOrigin(1, 0);
-    this.betText = this.add.text(W - 28, 40, money(this.bet), {
-      fontSize: '17px',
-      fontFamily: '"Arial Black", Arial, sans-serif',
+    this.betText = this._text(W - 28, 40, money(this.bet), {
+      fontSize: '16px',
+      fontFamily: 'Arial, sans-serif',
+      fontStyle: 'bold',
       color: '#f4f7ff',
     }).setOrigin(1, 0);
 
-    this.valueCaption = this.add.text(W / 2, 26, '', {
-      fontSize: '10px',
-      fontFamily: '"Arial Black", Arial, sans-serif',
+    this.valueCaption = this._text(W / 2, 26, '', {
+      fontSize: '11px',
+      fontFamily: 'Arial, sans-serif',
+      fontStyle: 'bold',
       color: '#67e8f9',
     }).setOrigin(0.5, 0);
-    this.valueText = this.add.text(W / 2, 42, money(this._currentValue()), {
+    this.valueText = this._text(W / 2, 42, money(this._currentValue()), {
       fontSize: '24px',
-      fontFamily: '"Arial Black", Arial, sans-serif',
-      color: '#a78bfa',
-      stroke: '#1a2340',
-      strokeThickness: 4,
+      fontFamily: 'Arial, sans-serif',
+      fontStyle: 'bold',
+      color: '#c4b5fd',
     }).setOrigin(0.5, 0);
 
-    this.progressText = this.add.text(W / 2, 76, '', {
+    this.progressText = this._text(W / 2, 76, '', {
       fontSize: '12px',
-      fontFamily: '"Arial Black", Arial, sans-serif',
+      fontFamily: 'Arial, sans-serif',
+      fontStyle: 'bold',
       color: '#e0e7ff',
     }).setOrigin(0.5, 0);
 
-    this.modeText = this.add.text(W / 2, 106, 'Carregando rodada…', {
-      fontSize: '10px',
+    this.modeText = this._text(W / 2, 106, 'Carregando rodada…', {
+      fontSize: '11px',
       fontFamily: 'Arial, sans-serif',
-      color: '#a3aecb',
+      color: '#b8c4df',
     }).setOrigin(0.5, 0);
   }
 
@@ -268,28 +278,28 @@ export default class GameScene extends Phaser.Scene {
     this.rackGfx.fillRoundedRect(14, this.pieceY - 58, W - 28, 116, 10);
     this.rackGfx.lineStyle(1, 0xa78bfa, 0.62);
     this.rackGfx.strokeRoundedRect(14, this.pieceY - 58, W - 28, 116, 10);
-    this.add.text(W / 2, this.pieceY - 50, 'PECAS DISPONIVEIS', {
+    this._text(W / 2, this.pieceY - 50, 'Peças disponíveis', {
       fontSize: '11px',
-      fontFamily: '"Arial Black", Arial, sans-serif',
-      color: '#a78bfa',
+      fontFamily: 'Arial, sans-serif',
+      fontStyle: 'bold',
+      color: '#c4b5fd',
     }).setOrigin(0.5, 0);
   }
 
   _createCashoutButton() {
     this.cashoutGfx = this.add.graphics().setDepth(30);
-    this.cashoutLabel = this.add.text(W / 2, this.cashoutY - 8, '', {
-      fontSize: '17px',
-      fontFamily: '"Arial Black", Arial, sans-serif',
-      color: '#f4f7ff',
-      stroke: '#1a2340',
-      strokeThickness: 4,
-    }).setOrigin(0.5).setDepth(31);
-    this.cashoutSub = this.add.text(W / 2, this.cashoutY + 14, '', {
-      fontSize: '10px',
+    this.cashoutLabel = this._text(W / 2, this.cashoutY - 9, '', {
+      fontSize: '19px',
       fontFamily: 'Arial, sans-serif',
-      color: '#ffe8ac',
+      fontStyle: 'bold',
+      color: '#f4f7ff',
     }).setOrigin(0.5).setDepth(31);
-    this.cashoutZone = this.add.zone(W / 2, this.cashoutY, W - 40, 58)
+    this.cashoutSub = this._text(W / 2, this.cashoutY + 14, '', {
+      fontSize: '12px',
+      fontFamily: 'Arial, sans-serif',
+      color: '#b8c4df',
+    }).setOrigin(0.5).setDepth(31);
+    this.cashoutZone = this.add.zone(W / 2, this.cashoutY, W - 40, 64)
       .setInteractive({ useHandCursor: true })
       .setDepth(32);
     this.cashoutZone.on('pointerdown', () => this._cashOut());
@@ -415,11 +425,11 @@ export default class GameScene extends Phaser.Scene {
     const py = Math.max(110, H / 2 - 145);
     const dim = this.add.rectangle(0, 0, W, H, 0x000000, 0.8).setOrigin(0).setInteractive();
     const panel = this.add.rectangle(W / 2, py + 145, W - 40, 290, THEME.panelRaised);
-    const title = this.add.text(W / 2, py + 34, 'RODADA PAUSADA', {
+    const title = this._text(W / 2, py + 34, 'RODADA PAUSADA', {
       fontSize: '19px', fontFamily: 'Arial, sans-serif', color: '#f4f7ff', fontStyle: 'bold',
     }).setOrigin(0.5);
-    const body = this.add.text(W / 2, py + 108, message, {
-      fontSize: '14px', fontFamily: 'Arial, sans-serif', color: '#a3aecb',
+    const body = this._text(W / 2, py + 108, message, {
+      fontSize: '14px', fontFamily: 'Arial, sans-serif', color: '#b8c4df',
       wordWrap: { width: W - 82 }, align: 'center', lineSpacing: 5,
     }).setOrigin(0.5);
     const retryButton = this._makePanelButton(W / 2, py + 200, W - 80, 45, 'TENTAR NOVAMENTE', true, () => {
@@ -739,9 +749,9 @@ export default class GameScene extends Phaser.Scene {
     const pending = [GAME_STATE.STARTING, GAME_STATE.MOVE_PENDING, GAME_STATE.CASHOUT_PENDING, GAME_STATE.ERROR].includes(this.gameState);
     const done = this.resultShown || this.gameState === GAME_STATE.GAME_OVER;
     const x = 20;
-    const y = this.cashoutY - 29;
+    const y = this.cashoutY - 32;
     const width = W - 40;
-    const height = 58;
+    const height = 64;
 
     this.cashoutGfx.clear();
     const showButton = unlocked && !done;
@@ -750,17 +760,19 @@ export default class GameScene extends Phaser.Scene {
     this.cashoutZone.setVisible(showButton);
     if (this.cashoutZone.input) this.cashoutZone.input.enabled = showButton && !pending;
     if (!showButton) {
+      this.cashoutSub.setColor('#b8c4df');
       this.cashoutSub.setText(done ? 'Rodada finalizada' : `Resgate após ${BLOCK_GAME_CONFIG.clearsToUnlockCashout} linhas ou colunas (${Math.min(this.totalClears, BLOCK_GAME_CONFIG.clearsToUnlockCashout)}/${BLOCK_GAME_CONFIG.clearsToUnlockCashout})`);
       return;
     }
     if (unlocked && !pending && !done) {
-      this.cashoutGfx.fillGradientStyle(0xa78bfa, 0xa78bfa, 0x67e8f9, 0x67e8f9, 1);
+      this.cashoutGfx.fillStyle(THEME.primary, 1);
       this.cashoutGfx.fillRoundedRect(x, y, width, height, 10);
       this.cashoutGfx.lineStyle(2, 0xffffff, 0.36);
       this.cashoutGfx.strokeRoundedRect(x, y, width, height, 10);
-      this.cashoutLabel.setText(`RESGATAR ${money(this._currentValue())}`);
+      this.cashoutLabel.setText(`Resgatar ${money(this._currentValue())}`);
       this.cashoutLabel.setColor('#090b1a');
-      this.cashoutSub.setText(this.demoMode ? 'modo demo admin' : 'crédito no saldo após confirmação');
+      this.cashoutSub.setText(this.demoMode ? 'Demo: sem movimentar saldo real' : 'Crédito no saldo após confirmação');
+      this.cashoutSub.setColor('#20233f');
       return;
     }
 
@@ -769,7 +781,8 @@ export default class GameScene extends Phaser.Scene {
     this.cashoutGfx.lineStyle(1, 0xa78bfa, 0.24);
     this.cashoutGfx.strokeRoundedRect(x, y, width, height, 10);
 
-    this.cashoutLabel.setText('CONFIRMANDO...');
+    this.cashoutLabel.setText('Confirmando…');
+    this.cashoutSub.setColor('#d8e0f2');
     this.cashoutSub.setText(this.gameState === GAME_STATE.ERROR ? 'aguardando reconexão' : 'aguarde a confirmação da rodada');
     this.cashoutLabel.setColor('#f4f7ff');
   }
@@ -823,41 +836,40 @@ export default class GameScene extends Phaser.Scene {
     panel.lineStyle(2, won ? THEME.primary : THEME.danger, 0.62);
     panel.strokeRoundedRect(px, py, pw, ph, 12);
 
-    const title = this.add.text(W / 2, py + 42, won ? 'RESGATE CONCLUIDO' : 'FIM DA RODADA', {
+    const title = this._text(W / 2, py + 42, won ? 'Resgate concluído' : 'Fim da rodada', {
       fontSize: '20px',
-      fontFamily: '"Arial Black", Arial, sans-serif',
+      fontFamily: 'Arial, sans-serif',
+      fontStyle: 'bold',
       color: won ? '#a78bfa' : '#ff9aa9',
-      stroke: '#090b1a',
-      strokeThickness: 5,
     }).setOrigin(0.5);
 
-    const value = this.add.text(W / 2, py + 92, won ? money(this.demoMode ? this._currentValue() : this.settledPayout) : money(0), {
+    const value = this._text(W / 2, py + 92, won ? money(this.demoMode ? this._currentValue() : this.settledPayout) : money(0), {
       fontSize: '34px',
-      fontFamily: '"Arial Black", Arial, sans-serif',
+      fontFamily: 'Arial, sans-serif',
+      fontStyle: 'bold',
       color: won ? '#67e8f9' : '#f4f7ff',
-      stroke: '#12172b',
-      strokeThickness: won ? 5 : 0,
     }).setOrigin(0.5);
 
-    const details = this.add.text(W / 2, py + 154, [
+    const details = this._text(W / 2, py + 154, [
       `Linhas/colunas: ${this.totalClears}`,
       `Melhor combo: ${this.bestCombo}`,
       `Jogadas: ${this.moves}`,
-      `Tier: ${this.difficultyTier}`,
+      `Nível: ${this.difficultyTier}`,
     ].join('\n'), {
       fontSize: '14px',
-      fontFamily: '"Arial Black", Arial, sans-serif',
+      fontFamily: 'Arial, sans-serif',
+      fontStyle: 'bold',
       color: '#f4f7ff',
       align: 'center',
       lineSpacing: 7,
     }).setOrigin(0.5);
 
-    const note = this.add.text(W / 2, py + 218, this.demoMode
+    const note = this._text(W / 2, py + 218, this.demoMode
       ? 'Modo demo admin: nenhum saldo real foi debitado ou creditado.'
       : won ? `Resgate creditado. Saldo: ${money(state.balance)}` : `Aposta encerrada sem resgate. Saldo: ${money(state.balance)}`, {
       fontSize: '12px',
       fontFamily: 'Arial, sans-serif',
-      color: '#a3aecb',
+      color: '#b8c4df',
       align: 'center',
       wordWrap: { width: pw - 42 },
       lineSpacing: 4,
@@ -911,9 +923,10 @@ export default class GameScene extends Phaser.Scene {
     bg.fillRoundedRect(-width / 2, -height / 2, width, height, 8);
     bg.lineStyle(1, primary ? 0xffffff : 0x67e8f9, primary ? 0.42 : 0.26);
     bg.strokeRoundedRect(-width / 2, -height / 2, width, height, 8);
-    const label = this.add.text(0, 0, text, {
+    const label = this._text(0, 0, text, {
       fontSize: primary ? '15px' : '12px',
-      fontFamily: '"Arial Black", Arial, sans-serif',
+      fontFamily: 'Arial, sans-serif',
+      fontStyle: 'bold',
       color: primary ? '#090b1a' : '#e0e7ff',
     }).setOrigin(0.5);
     const zone = this.add.zone(0, 0, width, height).setInteractive({ useHandCursor: true });
@@ -935,20 +948,19 @@ export default class GameScene extends Phaser.Scene {
     panel.lineStyle(2, THEME.primary, 0.58);
     panel.strokeRoundedRect(px, py, pw, ph, 12);
 
-    const title = this.add.text(W / 2, py + 42, BRAND.upperName, {
+    const title = this._text(W / 2, py + 42, BRAND.upperName, {
       fontSize: '22px',
-      fontFamily: '"Arial Black", Arial, sans-serif',
+      fontFamily: 'Arial, sans-serif',
+      fontStyle: 'bold',
       color: '#a78bfa',
-      stroke: '#1a2340',
-      strokeThickness: 5,
     }).setOrigin(0.5);
 
-    const body = this.add.text(W / 2, py + 142, [
-      'Arraste as pecas para o tabuleiro.',
+    const body = this._text(W / 2, py + 142, [
+      'Arraste as peças para o tabuleiro.',
       'Complete linhas ou colunas para limpar.',
       this.demoMode ? 'Demo com peças simples e nível fácil.' : 'Novas peças podem chegar sem encaixe.',
       `Após ${BLOCK_GAME_CONFIG.clearsToUnlockCashout} limpezas, o resgate aparece.`,
-      'Se nenhuma peca couber, a rodada termina.',
+      'Se nenhuma peça couber, a rodada termina.',
     ].join('\n'), {
       fontSize: '14px',
       fontFamily: 'Arial, sans-serif',
@@ -979,9 +991,10 @@ export default class GameScene extends Phaser.Scene {
   _showToast(message) {
     if (this.toast) this.toast.destroy();
     const y = Math.max(118, this.boardY - 28);
-    const toast = this.add.text(W / 2, y, message, {
+    const toast = this._text(W / 2, y, message, {
       fontSize: '13px',
-      fontFamily: '"Arial Black", Arial, sans-serif',
+      fontFamily: 'Arial, sans-serif',
+      fontStyle: 'bold',
       color: '#090b1a',
       backgroundColor: '#a78bfa',
       padding: { x: 12, y: 8 },

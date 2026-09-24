@@ -3,6 +3,7 @@ import hashlib
 import hmac
 import json
 import re
+import secrets
 import unicodedata
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -36,6 +37,13 @@ def require_referral_code(value: str | None) -> str:
     if not code:
         raise ValueError("Referral code invalido. Use 3 a 40 caracteres: letras, numeros, _ ou -.")
     return code
+
+
+def generate_referral_code(name: str | None) -> str:
+    """Readable campaign code with an independent, high-entropy suffix."""
+    raw = unicodedata.normalize("NFKD", str(name or "")).encode("ascii", "ignore").decode("ascii")
+    prefix = re.sub(r"[^A-Z0-9]+", "-", raw.upper()).strip("-")[:19].rstrip("-") or "CAMPANHA"
+    return f"{prefix}-{secrets.token_hex(10).upper()}"
 
 
 def _b64url_encode(raw: bytes) -> str:

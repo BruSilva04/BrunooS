@@ -2,11 +2,14 @@ from datetime import timedelta
 from typing import Any
 
 from fastapi import APIRouter, Header, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+from postgrest.exceptions import APIError
 
 from db.database import (
+    AffiliateCampaignMigrationRequired,
+    ReferralCodeConflict,
     create_acquisition_click,
-    create_affiliate,
+    create_affiliate_with_campaign,
     create_campaign,
     get_acquisition_report,
     get_active_campaign_by_referral_code,
@@ -49,6 +52,13 @@ class AffiliateCreateRequest(BaseModel):
     contact: str | None = Field(default=None, max_length=180)
     status: str = Field(default="active", pattern=r"^(active|paused|archived)$")
     notes: str | None = Field(default=None, max_length=1000)
+    campaign_name: str | None = Field(default=None, min_length=2, max_length=160)
+    media_cost: float = Field(default=0, ge=0, le=9999999999.99, allow_inf_nan=False)
+
+    @field_validator("name", "campaign_name", mode="before")
+    @classmethod
+    def strip_names(cls, value):
+        return value.strip() if isinstance(value, str) else value
 
 
 class AffiliatePatchRequest(BaseModel):
@@ -62,12 +72,17 @@ class AffiliatePatchRequest(BaseModel):
 class CampaignCreateRequest(BaseModel):
     affiliate_id: str = Field(min_length=20, max_length=80)
     name: str = Field(min_length=2, max_length=160)
-    referral_code: str = Field(min_length=3, max_length=64)
+    referral_code: str | None = Field(default=None, min_length=3, max_length=64)
     status: str = Field(default="active", pattern=r"^(active|paused|archived)$")
-    media_cost: float = Field(default=0, ge=0)
+    media_cost: float = Field(default=0, ge=0, le=9999999999.99, allow_inf_nan=False)
     starts_at: str | None = Field(default=None, max_length=40)
     ends_at: str | None = Field(default=None, max_length=40)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def strip_name(cls, value):
+        return value.strip() if isinstance(value, str) else value
 
 
 class CampaignPatchRequest(BaseModel):
@@ -154,8 +169,15 @@ async def admin_create_affiliate(
     authorization: str | None = Header(default=None),
 ):
     await require_admin(authorization)
-    affiliate = await create_affiliate(payload.model_dump())
-    return {"affiliate": affiliate}
+    try:
+        return await create_affiliate_with_campaign(payload.model_dump())
+    except AffiliateCampaignMigrationRequired as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Aplique backend/db/migrations/20260923_affiliate_campaign.sql no SQL Editor do Supabase para criar a influenciadora com sua campanha.",
+        ) from exc
+    except (APIError, RuntimeError) as exc:
+        raise HTTPException(status_code=503, detail="Nao foi possivel criar a influenciadora e a campanha. Tente novamente.") from exc
 
 
 @router.patch("/admin/affiliates/{affiliate_id}")
@@ -191,12 +213,17 @@ async def admin_create_campaign(
 
     try:
         data = payload.model_dump()
-        data["referral_code"] = require_referral_code(data.get("referral_code"))
-        if await get_campaign_by_referral_code(data["referral_code"]):
-            raise HTTPException(status_code=409, detail="Referral code ja existe")
+        if data.get("referral_code") is not None:
+            data["referral_code"] = require_referral_code(data["referral_code"])
+            if await get_campaign_by_referral_code(data["referral_code"]):
+                raise HTTPException(status_code=409, detail="Referral code ja existe")
         campaign = await create_campaign(data)
+    except ReferralCodeConflict as exc:
+        raise HTTPException(status_code=409, detail="Referral code ja existe") from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except (APIError, RuntimeError) as exc:
+        raise HTTPException(status_code=503, detail="Nao foi possivel criar a campanha. Tente novamente.") from exc
     return {"campaign": campaign}
 
 

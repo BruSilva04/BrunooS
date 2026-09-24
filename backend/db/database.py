@@ -15,6 +15,7 @@ from services.auth import hash_password
 from services.account_mode import account_balance, is_demo_user
 from services.tracking import (
     date_in_range,
+    generate_referral_code,
     normalize_referral_code,
     parse_datetime_bound,
     parse_row_datetime,
@@ -318,21 +319,49 @@ async def get_affiliate(affiliate_id: str) -> dict[str, Any] | None:
     return response.data[0] if response.data else None
 
 
-async def create_affiliate(data: dict[str, Any]) -> dict[str, Any]:
+class AffiliateCampaignMigrationRequired(RuntimeError):
+    pass
+
+
+class ReferralCodeConflict(RuntimeError):
+    pass
+
+
+def is_referral_code_conflict(exc: APIError) -> bool:
+    return exc.code == "23505" and "campaigns_referral_code_unique_idx" in str(exc)
+
+
+async def create_affiliate_with_campaign(data: dict[str, Any]) -> dict[str, Any]:
+    """Both records must commit together; never fall back to separate inserts."""
     payload = {
-        "name": _clean_text(data.get("name"), 120),
-        "handle": _clean_text(data.get("handle"), 80),
-        "contact": _clean_text(data.get("contact"), 180),
-        "status": _clean_text(data.get("status"), 32) or "active",
-        "notes": _clean_text(data.get("notes"), 1000),
+        "p_name": _clean_text(data.get("name"), 120),
+        "p_handle": _clean_text(data.get("handle"), 80),
+        "p_contact": _clean_text(data.get("contact"), 180),
+        "p_status": _clean_text(data.get("status"), 32) or "active",
+        "p_notes": _clean_text(data.get("notes"), 1000),
+        "p_campaign_name": _clean_text(data.get("campaign_name"), 160) or "Divulgação inicial",
+        "p_media_cost": round(float(data.get("media_cost", 0) or 0), 2),
     }
-    payload = {key: value for key, value in payload.items() if value is not None}
 
-    def insert_affiliate():
-        return get_supabase_client().table(AFFILIATES_TABLE).insert(payload).execute()
-
-    response = await anyio.to_thread.run_sync(insert_affiliate)
-    return response.data[0]
+    for _ in range(5):
+        payload["p_referral_code"] = generate_referral_code(payload["p_name"])
+        try:
+            response = await anyio.to_thread.run_sync(
+                lambda: get_supabase_client().rpc("create_affiliate_with_campaign", payload).execute()
+            )
+        except APIError as exc:
+            if exc.code == "PGRST202":
+                raise AffiliateCampaignMigrationRequired() from exc
+            if is_referral_code_conflict(exc):
+                continue
+            raise
+        result = response.data
+        if isinstance(result, list):
+            result = result[0] if result else None
+        if not isinstance(result, dict) or not result.get("affiliate") or not result.get("campaign"):
+            raise RuntimeError("Empty affiliate campaign transaction result")
+        return result
+    raise RuntimeError("Could not generate a unique campaign code")
 
 
 async def update_affiliate(affiliate_id: str, data: dict[str, Any]) -> dict[str, Any] | None:
@@ -424,7 +453,8 @@ async def get_active_campaign_by_referral_code(referral_code: str) -> dict[str, 
 
 
 async def create_campaign(data: dict[str, Any]) -> dict[str, Any]:
-    code = require_referral_code(data.get("referral_code"))
+    automatic_code = data.get("referral_code") is None
+    code = None if automatic_code else require_referral_code(data.get("referral_code"))
     payload = {
         "affiliate_id": data.get("affiliate_id"),
         "name": _clean_text(data.get("name"), 160),
@@ -440,8 +470,17 @@ async def create_campaign(data: dict[str, Any]) -> dict[str, Any]:
     def insert_campaign():
         return get_supabase_client().table(CAMPAIGNS_TABLE).insert(payload).execute()
 
-    response = await anyio.to_thread.run_sync(insert_campaign)
-    return response.data[0]
+    for _ in range(5):
+        payload["referral_code"] = generate_referral_code(payload["name"]) if automatic_code else code
+        try:
+            response = await anyio.to_thread.run_sync(insert_campaign)
+            return response.data[0]
+        except APIError as exc:
+            if not is_referral_code_conflict(exc):
+                raise
+            if not automatic_code:
+                raise ReferralCodeConflict() from exc
+    raise RuntimeError("Could not generate a unique campaign code")
 
 
 async def update_campaign(campaign_id: str, data: dict[str, Any]) -> dict[str, Any] | None:

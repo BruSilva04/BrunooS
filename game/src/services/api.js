@@ -6,6 +6,8 @@ const SESSION_STARTED_KEY = 'sereia_auth_started_at';
 const SESSION_LAST_SEEN_KEY = 'sereia_auth_last_seen_at';
 const ACQ_VISITOR_KEY = 'sereia_acq_visitor_id';
 const ACQ_ATTRIBUTION_KEY = 'sereia_acq_first_touch';
+const ACQ_REQUEST_TIMEOUT_MS = 10000;
+let acquisitionTrackingPromise = null;
 // Keep existing storage keys so the visual rebrand preserves sessions and attribution.
 const SESSION_IDLE_MS = 30 * 60 * 1000;
 const SESSION_MAX_AGE_MS = 4 * 60 * 60 * 1000;
@@ -196,26 +198,36 @@ export function getStoredAcquisition() {
     }
     return stored;
   } catch {
-    trackingStore().removeItem(ACQ_ATTRIBUTION_KEY);
+    try {
+      trackingStore().removeItem(ACQ_ATTRIBUTION_KEY);
+    } catch {
+      // Acquisition is optional when the browser does not allow storage.
+    }
     return null;
   }
 }
 
-export async function initAcquisitionTracking() {
-  const params = new URLSearchParams(window.location.search || '');
-  const referralCode = normalizeReferralCode(params.get('ref'));
-  if (!referralCode) {
-    getStoredAcquisition();
-    return null;
-  }
+export function initAcquisitionTracking() {
+  if (acquisitionTrackingPromise) return acquisitionTrackingPromise;
+  acquisitionTrackingPromise = trackAcquisitionClick().finally(() => {
+    acquisitionTrackingPromise = null;
+  });
+  return acquisitionTrackingPromise;
+}
 
-  const existingFirstTouch = getStoredAcquisition();
-  const visitorId = getVisitorId();
-
+async function trackAcquisitionClick() {
   try {
+    const params = new URLSearchParams(window.location.search || '');
+    const referralCode = normalizeReferralCode(params.get('ref'));
+    if (!referralCode) {
+      getStoredAcquisition();
+      return null;
+    }
+    const visitorId = getVisitorId();
     const response = await request('/api/tracking/click', {
       auth: false,
       method: 'POST',
+      signal: AbortSignal.timeout(ACQ_REQUEST_TIMEOUT_MS),
       body: JSON.stringify({
         referral_code: referralCode,
         visitor_id: visitorId,
@@ -228,7 +240,7 @@ export async function initAcquisitionTracking() {
       }),
     });
 
-    if (response.success && !existingFirstTouch) {
+    if (response.success && !getStoredAcquisition()) {
       trackingStore().setItem(ACQ_ATTRIBUTION_KEY, JSON.stringify({
         click_id: response.click_id,
         campaign_id: response.campaign_id,
@@ -272,10 +284,13 @@ export function login(username, password) {
   });
 }
 
-export function register(payload) {
+export async function register(payload) {
+  // A cold backend can still be recording the landing click when the form is submitted.
+  // Read first touch after that request completes, with the same bounded timeout.
+  if (!getStoredAcquisition()) await initAcquisitionTracking();
   return request('/api/auth/register', {
     method: 'POST',
-    body: JSON.stringify(payload),
+    body: JSON.stringify({ ...payload, ...getAcquisitionForRegistration() }),
   });
 }
 

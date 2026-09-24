@@ -17,9 +17,13 @@ export default class MenuScene extends Phaser.Scene {
     this._drawHero();
     this._drawBetPanel();
     this._drawPlayButton();
-    this.add.text(W / 2, H - 26, '18+ · Jogue com responsabilidade', {
-      fontFamily: 'Arial, sans-serif', fontSize: '11px', color: '#a3aecb',
+    this._text(W / 2, H - 26, '18+ · Jogue com responsabilidade', {
+      fontFamily: 'Arial, sans-serif', fontSize: '11px', color: '#b8c4df',
     }).setOrigin(0.5);
+  }
+
+  _text(x, y, value, style) {
+    return this.add.text(x, y, value, { resolution: 3, ...style });
   }
 
   _drawBackground() {
@@ -35,12 +39,12 @@ export default class MenuScene extends Phaser.Scene {
   }
 
   _drawHeader() {
-    this._button(62, 38, 88, 36, '‹ LOBBY', false, () => this.scene.start('Lobby'));
-    this.add.text(W - 22, 25, this.demoMode ? 'SALDO DEMO' : 'SALDO DA CONTA', {
-      fontFamily: 'Arial, sans-serif', fontSize: '9px', color: '#a3aecb',
+    this._button(62, 38, 88, 36, '‹ Lobby', false, () => this.scene.start('Lobby'));
+    this._text(W - 22, 25, this.demoMode ? 'Saldo demo' : 'Saldo da conta', {
+      fontFamily: 'Arial, sans-serif', fontSize: '11px', color: '#b8c4df',
     }).setOrigin(1, 0);
-    this.add.text(W - 22, 41, this._money(state.balance), {
-      fontFamily: 'Arial, sans-serif', fontSize: '15px', fontStyle: 'bold', color: '#f4f7ff',
+    this._text(W - 22, 41, this._money(state.balance), {
+      fontFamily: 'Arial, sans-serif', fontSize: '18px', fontStyle: 'bold', color: '#f4f7ff',
     }).setOrigin(1, 0);
   }
 
@@ -59,11 +63,11 @@ export default class MenuScene extends Phaser.Scene {
       g.fillStyle(0xffffff, 0.24);
       g.fillRoundedRect(x + 4, y + 3, size - 8, 5, 2);
     });
-    this.add.text(W / 2, 222, BRAND.upperName, {
+    this._text(W / 2, 222, BRAND.upperName, {
       fontSize: '30px', fontFamily: 'Arial, sans-serif', fontStyle: 'bold', color: '#f4f7ff',
     }).setOrigin(0.5);
-    this.add.text(W / 2, 253, BRAND.tagline, {
-      fontSize: '14px', fontFamily: 'Arial, sans-serif', color: '#a3aecb',
+    this._text(W / 2, 253, BRAND.tagline, {
+      fontSize: '14px', fontFamily: 'Arial, sans-serif', color: '#b8c4df',
     }).setOrigin(0.5);
   }
 
@@ -76,24 +80,24 @@ export default class MenuScene extends Phaser.Scene {
     g.fillRoundedRect(x, y, width, 196, 16);
     g.lineStyle(1, COLORS.primary, 0.22);
     g.strokeRoundedRect(x, y, width, 196, 16);
-    this.add.text(x + 20, y + 21, this.demoMode ? 'VALOR SIMULADO' : 'APOSTA', {
-      fontSize: '11px', fontFamily: 'Arial, sans-serif', fontStyle: 'bold', color: '#a3aecb',
+    this._text(x + 20, y + 19, 'Escolha o valor', {
+      fontSize: '14px', fontFamily: 'Arial, sans-serif', fontStyle: 'bold', color: '#d8e0f2',
     });
-    this.betText = this.add.text(x + 20, y + 43, this._money(this.bet), {
-      fontSize: '29px', fontFamily: 'Arial, sans-serif', fontStyle: 'bold', color: '#f4f7ff',
+    this.betText = this._text(x + 20, y + 42, this._money(this.bet), {
+      fontSize: '34px', fontFamily: 'Arial, sans-serif', fontStyle: 'bold', color: '#f4f7ff',
     });
-    this.add.text(x + width - 20, y + 23, this.demoMode ? 'DEMO' : 'REAL', {
-      fontSize: '10px', fontFamily: 'Arial, sans-serif', fontStyle: 'bold',
+    this._text(x + width - 20, y + 23, this.demoMode ? 'Demo' : 'Real', {
+      fontSize: '11px', fontFamily: 'Arial, sans-serif', fontStyle: 'bold',
       color: '#67e8f9', backgroundColor: '#1a2340', padding: { x: 9, y: 6 },
     }).setOrigin(1, 0);
     BETS.forEach((value, index) => {
       const bx = x + 18 + index * 63;
-      const by = y + 96;
+      const by = y + 94;
       const bg = this.add.graphics();
-      const label = this.add.text(bx + 28, by + 20, String(value), {
-        fontSize: '14px', fontFamily: 'Arial, sans-serif', fontStyle: 'bold',
+      const label = this._text(bx + 28, by + 24, String(value), {
+        fontSize: '17px', fontFamily: 'Arial, sans-serif', fontStyle: 'bold',
       }).setOrigin(0.5);
-      const hit = this.add.zone(bx + 28, by + 20, 56, 42).setInteractive({ useHandCursor: true });
+      const hit = this.add.zone(bx + 28, by + 24, 56, 48).setInteractive({ useHandCursor: true });
       hit.on('pointerdown', () => {
         if (state.activeBlockRound) return;
         this.bet = value;
@@ -104,8 +108,8 @@ export default class MenuScene extends Phaser.Scene {
       this.betButtons.push({ value, bg, label, x: bx, y: by });
     });
     this._refreshChips();
-    this.add.text(W / 2, y + 163, this.demoMode ? 'Valores fictícios. Seu saldo permanece igual.' : state.activeBlockRound ? 'Rodada em andamento. Nenhuma nova aposta será cobrada.' : 'A aposta será debitada do saldo ao iniciar.', {
-      fontSize: '11px', fontFamily: 'Arial, sans-serif', color: '#a3aecb',
+    this._text(W / 2, y + 163, this.demoMode ? 'Valor fictício. Seu saldo não muda.' : state.activeBlockRound ? 'Rodada em andamento. Sem nova cobrança.' : 'A aposta será debitada do saldo ao iniciar.', {
+      fontSize: '12px', fontFamily: 'Arial, sans-serif', color: '#b8c4df',
       align: 'center', wordWrap: { width: width - 32 },
     }).setOrigin(0.5);
   }
@@ -115,9 +119,9 @@ export default class MenuScene extends Phaser.Scene {
       const selected = chip.value === this.bet;
       chip.bg.clear();
       chip.bg.fillStyle(selected ? COLORS.primary : COLORS.panelRaised, 1);
-      chip.bg.fillRoundedRect(chip.x, chip.y, 56, 40, 9);
-      chip.bg.lineStyle(1, COLORS.primary, selected ? 1 : 0.16);
-      chip.bg.strokeRoundedRect(chip.x, chip.y, 56, 40, 9);
+      chip.bg.fillRoundedRect(chip.x, chip.y, 56, 48, 9);
+      chip.bg.lineStyle(selected ? 2 : 1, selected ? COLORS.accent : COLORS.primary, selected ? 0.9 : 0.3);
+      chip.bg.strokeRoundedRect(chip.x, chip.y, 56, 48, 9);
       chip.label.setColor(selected ? '#090b1a' : '#f4f7ff');
     });
   }
@@ -136,13 +140,13 @@ export default class MenuScene extends Phaser.Scene {
       this.scene.start('Game', { bet: this.bet });
     });
     this._refreshPlayLabel();
-    this.add.text(W / 2, 593, [
+    this._text(W / 2, 604, [
       'Arraste as peças e complete linhas ou colunas.',
       this.demoMode ? 'Demo com peças simples e nível fácil.' : 'Novas sequências podem trazer peças sem encaixe.',
       'Complete 5 linhas ou colunas para liberar o resgate.',
     ], {
-      fontSize: '12px', fontFamily: 'Arial, sans-serif', color: '#a3aecb',
-      align: 'center', lineSpacing: 7,
+      fontSize: '13px', fontFamily: 'Arial, sans-serif', color: '#b8c4df',
+      align: 'center', lineSpacing: 7, wordWrap: { width: W - 44 },
     }).setOrigin(0.5);
   }
 
@@ -150,8 +154,8 @@ export default class MenuScene extends Phaser.Scene {
     const bg = this.add.graphics();
     bg.fillStyle(primary ? COLORS.primary : COLORS.panelRaised, 1);
     bg.fillRoundedRect(x - width / 2, y - height / 2, width, height, 12);
-    const label = this.add.text(x, y, text, {
-      fontFamily: 'Arial, sans-serif', fontSize: primary ? '16px' : '11px',
+    const label = this._text(x, y, text, {
+      fontFamily: 'Arial, sans-serif', fontSize: primary ? '18px' : '12px',
       fontStyle: 'bold', color: primary ? '#090b1a' : '#f4f7ff',
     }).setOrigin(0.5);
     const hit = this.add.zone(x, y, width, height).setInteractive({ useHandCursor: true });
@@ -163,9 +167,9 @@ export default class MenuScene extends Phaser.Scene {
 
   _refreshPlayLabel() {
     if (!this.playLabel) return;
-    this.playLabel.setText(state.activeBlockRound ? 'RETOMAR RODADA  ›'
-      : this.demoMode ? 'JOGAR DEMO  ›'
-        : state.balance >= this.bet ? 'JOGAR  ›' : 'ADICIONAR SALDO  ›');
+    this.playLabel.setText(state.activeBlockRound ? 'Retomar rodada'
+      : this.demoMode ? 'Jogar demo'
+        : state.balance >= this.bet ? `Jogar por ${this._money(this.bet)}` : 'Adicionar saldo');
   }
 
   _money(value) {

@@ -54,9 +54,12 @@ assert.deepEqual(calls, ['first', 'second'], 'concurrent refreshes do not duplic
 assert.equal(entries.size, 0);
 
 const lobbyModule = new vm.SourceTextModule(await readFile(new URL('../src/scenes/LobbyScene.js', import.meta.url), 'utf8'), { context });
+const welcomeModule = new vm.SourceTextModule(await readFile(new URL('../src/services/depositWelcome.js', import.meta.url), 'utf8'), { context });
+await welcomeModule.link(() => { throw Error('Unexpected welcome deposit dependency'); });
 await lobbyModule.link(specifier => {
   if (specifier === '../services/api.js') return apiModule;
   if (specifier === '../services/demoHistory.js') return history;
+  if (specifier === '../services/depositWelcome.js') return welcomeModule;
   if (specifier === 'phaser') return synthetic({ default: { Scene: class {}, Scenes: { Events: { SHUTDOWN: 'shutdown' } } } });
   if (specifier === '../config.js') return synthetic({ W: 390, H: 844, state });
   if (specifier === '../brand.js') return synthetic({ BRAND: {} });

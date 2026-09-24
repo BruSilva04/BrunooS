@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { W, H, state } from '../config.js';
 import { BRAND } from '../brand.js';
 import { flushDemoHistory } from '../services/demoHistory.js';
+import { consumeWelcomeDeposit, hasPendingWelcomeDeposit } from '../services/depositWelcome.js';
 import {
   clearSession,
   confirmSandboxDeposit,
@@ -30,6 +31,7 @@ export default class LobbyScene extends Phaser.Scene {
     this.snapshot = null;
     this.currentTab = TABS.some((tab) => tab.key === data.tab) ? data.tab : 'lobby';
     this.modal = null;
+    this.welcomeDeposit = false;
     this.notice = data.notice || '';
     this.walletMessage = '';
     this.walletBusy = false;
@@ -78,8 +80,22 @@ export default class LobbyScene extends Phaser.Scene {
       state.demoMode = this.snapshot.demo_mode === true;
       state.activeBlockRound = this.snapshot.active_block_round || null;
       state.history = (this.snapshot.history || []).map((round) => Number(round.mult || 1)).slice(0, 5);
-      if (!background) this.modal = null;
-      if (!background || !unchanged) this._render();
+      if (!background) {
+        this.modal = null;
+        this.welcomeDeposit = false;
+      }
+      const showWelcomeDeposit = !this.modal && !state.demoMode && !this._isAdmin()
+        && hasPendingWelcomeDeposit(this.user);
+      if (showWelcomeDeposit) {
+        this.modal = 'deposit';
+        this.welcomeDeposit = true;
+        this.walletMessage = '';
+        this.currentDeposit = null;
+      }
+      if (!background || !unchanged || showWelcomeDeposit) this._render();
+      if (showWelcomeDeposit && this.root?.querySelector('[data-modal="deposit"]')) {
+        consumeWelcomeDeposit(this.user);
+      }
     } catch (error) {
       if (!mountedRoot || this.root !== mountedRoot || version !== this.loadVersion) return;
       if (error.status === 401) {
@@ -391,6 +407,7 @@ export default class LobbyScene extends Phaser.Scene {
         <div class="modal-backdrop" data-action="close-modal">
           <section class="modal-card wallet-modal" data-modal="${type}" tabindex="-1" role="dialog" aria-modal="true" aria-label="${title}">
             <h2>${title}</h2>
+            ${this.welcomeDeposit ? '<p class="deposit-welcome">Sua conta está pronta! Para adicionar saldo, recomendamos R$ 40.</p>' : ''}
             <p>${state.demoMode ? 'Simule um depósito na sua carteira demo. Nenhum pagamento real será gerado.' : 'Escolha um valor para gerar um Pix. O saldo entra somente após a confirmação do pagamento.'}</p>
             ${needsCustomer ? `
               <label>
@@ -403,7 +420,7 @@ export default class LobbyScene extends Phaser.Scene {
               </label>
             ` : ''}
             <div class="amount-grid">
-              ${[20, 50, 100, 200].map((amount) => `<button type="button" data-action="deposit-create" data-amount="${amount}" ${this.walletBusy ? 'disabled' : ''}>R$ ${amount}</button>`).join('')}
+              ${(state.demoMode ? [20, 50, 100, 200] : [40, 20, 50, 100, 200]).map((amount) => `<button type="button" class="${amount === 40 ? 'amount-recommended' : ''}" data-action="deposit-create" data-amount="${amount}" ${this.walletBusy ? 'disabled' : ''}>R$ ${amount}${amount === 40 ? '<span>Recomendado</span>' : ''}</button>`).join('')}
             </div>
             ${deposit ? `
               <div class="pix-box">
@@ -414,7 +431,7 @@ export default class LobbyScene extends Phaser.Scene {
               ${state.demoMode && this.currentDeposit?.sandbox ? `<button type="button" data-action="deposit-confirm" data-intent-id="${this._escape(deposit.id)}" ${this.walletBusy ? 'disabled' : ''}>Simular Pix pago</button>` : ''}
             ` : ''}
             ${message}
-            <button type="button" data-action="close-modal" ${this.walletBusy ? 'disabled' : ''}>Fechar</button>
+            <button type="button" data-action="close-modal" ${this.walletBusy ? 'disabled' : ''}>${this.welcomeDeposit ? 'Agora não' : 'Fechar'}</button>
           </section>
         </div>
       `;
@@ -573,6 +590,7 @@ export default class LobbyScene extends Phaser.Scene {
           this._closeModal();
         } else if (action === 'deposit' || action === 'withdraw') {
           this.modal = action;
+          this.welcomeDeposit = false;
           this.walletMessage = '';
           this.currentDeposit = null;
           this._render();
@@ -756,6 +774,7 @@ export default class LobbyScene extends Phaser.Scene {
     if (this.walletBusy) return;
     const action = this.modal;
     this.modal = null;
+    this.welcomeDeposit = false;
     this.walletMessage = '';
     this.currentDeposit = null;
     this._render();
@@ -957,6 +976,9 @@ export default class LobbyScene extends Phaser.Scene {
         .block-lobby-root .amount-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
         .block-lobby-root .modal-card button { min-height: 44px; border-radius: 10px; padding: 10px 12px; font-size: 12px; font-weight: 750; background: var(--color-primary); color: #131128; }
         .block-lobby-root .modal-card button[data-action="close-modal"] { background: var(--color-panel-raised); color: var(--color-muted); border: 1px solid var(--color-border); }
+        .block-lobby-root .amount-grid .amount-recommended { grid-column: 1 / -1; display: flex; justify-content: center; align-items: center; gap: 12px; border: 1px solid var(--color-accent); background: #67e8f918; color: var(--color-accent); }
+        .block-lobby-root .amount-recommended span { padding: 4px 8px; border-radius: 6px; background: var(--color-accent); color: #131128; font-size: 10px; }
+        .block-lobby-root .wallet-modal .deposit-welcome { color: var(--color-text); }
         .block-lobby-root .pix-box { display: grid; gap: 12px; padding: 16px; border-radius: 12px; background: var(--color-bg); border: 1px solid #67e8f930; }
         .block-lobby-root .pix-box strong { color: var(--color-accent); font-size: 22px; }
         .block-lobby-root .pix-box span { font-size: 12px; color: var(--color-muted); line-height: 1.5; }

@@ -24,7 +24,11 @@ function respond(status, body) {
 
 try {
   // Existing users retain their session and acquisition data after the rebrand.
-  window.localStorage.setItem('sereia_acq_first_touch', 'existing-attribution');
+  const existingAttribution = JSON.stringify({
+    click_id: 'existing-click', tracking_token: 'existing-token', referral_code: 'EXISTING',
+    expires_at: new Date(Date.now() + 86400000).toISOString(),
+  });
+  window.localStorage.setItem('sereia_acq_first_touch', existingAttribution);
   api.setSession('test-session', { username: 'teste' });
   assert.equal(window.sessionStorage.getItem('sereia_auth_token'), 'test-session');
   assert.equal(api.getAuthToken({ touch: false }), 'test-session');
@@ -71,7 +75,7 @@ try {
   window.sessionStorage.setItem('sereia_auth_last_seen_at', Date.now() - 31 * 60 * 1000);
   assert.equal(api.hasValidSession(), false);
   assert.equal(window.sessionStorage.getItem('sereia_auth_token'), null);
-  assert.equal(window.localStorage.getItem('sereia_acq_first_touch'), 'existing-attribution');
+  assert.equal(window.localStorage.getItem('sereia_acq_first_touch'), existingAttribution);
   console.log('API errors and session compatibility OK');
 } finally {
   globalThis.fetch = originalFetch;

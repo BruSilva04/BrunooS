@@ -2,6 +2,7 @@ import Phaser from 'phaser';
 import { W, H } from '../config.js';
 import { BRAND } from '../brand.js';
 import { getAcquisitionForRegistration, login, register, setSession } from '../services/api.js';
+import { queueWelcomeDeposit } from '../services/depositWelcome.js';
 
 export default class AuthScene extends Phaser.Scene {
   constructor() {
@@ -344,6 +345,7 @@ export default class AuthScene extends Phaser.Scene {
         });
       if (!this.root?.contains(form)) return;
       setSession(response.token, response.user);
+      if (!isLogin) queueWelcomeDeposit(response.user);
       document.activeElement?.blur?.();
       if (window.syncAppViewport) window.syncAppViewport();
       this.scene.start('Lobby');
