@@ -9,13 +9,14 @@ import * as logic from '../src/block/BlockPuzzleLogic.js';
 // whose animations never finish. Gameplay must not depend on those callbacks.
 const context = vm.createContext({ crypto: { randomUUID } });
 let start, move, cashout, read;
+let syncHistory = async () => {};
 const dependencies = {
   phaser: { default: { Scene: class {} } },
   '../brand.js': { BRAND: {} },
   '../config.js': config,
   '../block/BlockPuzzleLogic.js': logic,
   '../utils/SoundManager.js': { default: class {} },
-  '../services/demoHistory.js': { queueDemoResult: () => {}, flushDemoHistory: async () => {} },
+  '../services/demoHistory.js': { queueDemoResult: () => {}, flushDemoHistory: () => syncHistory() },
   '../services/api.js': {
     startBlockRound: (...args) => start(...args),
     placeBlockPiece: (...args) => move(...args),
@@ -222,3 +223,23 @@ largeRack._drawPieceGraphic = (graphics, piece, unit) => {
 largeRack._renderPieces();
 assert.equal(previews, 6);
 console.log('Block game flow: immediate clears, real settlement, retries, account mode and scene lifecycle OK');
+
+// The display changes only after the test settlement is acknowledged.
+const settledTest = scene(true);
+config.state.balance = 70;
+settledTest.balanceText = object();
+const note = object();
+syncHistory = async () => ({ balance: 154 });
+await settledTest._syncDemoResult({ request_id: 'test-result' }, note);
+assert.equal(config.state.balance,154);
+syncHistory = async () => { throw Error('offline'); };
+await settledTest._syncDemoResult({ request_id: 'test-result' }, note);
+assert.equal(config.state.balance,154,'a failed retry does not change the displayed balance');
+const lateBalance = deferred();
+syncHistory = () => lateBalance.promise;
+const syncing = settledTest._syncDemoResult({ request_id: 'late-result' }, note);
+settledTest.lifecycle = {};
+config.state.balance = 42;
+lateBalance.resolve({balance:200});
+await syncing;
+assert.equal(config.state.balance,42,'a closed scene cannot overwrite the next account balance');

@@ -1,6 +1,6 @@
 # Block Rush
 
-Puzzle de blocos com frontend em Phaser/Vite e plataforma de contas em FastAPI/Supabase. **Somente a conta definida em `ADMIN_USERNAME`, com papel ou permissão de administrador, usa modo demo.** Essa conta exibe saldo demonstrativo fixo de R$ 100, sem alterar a carteira real. Todas as demais contas jogam com o saldo da carteira: a aposta é debitada ao iniciar e o resgate confirmado é creditado pelo servidor.
+Puzzle de blocos com frontend em Phaser/Vite e plataforma de contas em FastAPI/Supabase. **Somente a conta definida em `ADMIN_USERNAME`, com papel ou permissão de administrador, usa modo demo.** Essa conta começa com R$ 100 de saldo de teste, que diminui com as apostas e aumenta com os resgates confirmados, sem alterar a carteira real. Todas as demais contas jogam com o saldo da carteira: a aposta é debitada ao iniciar e o resgate confirmado é creditado pelo servidor.
 
 Antes de publicar esta versão, aplique as [migrações do banco](backend/db/migrations/README.md) no Supabase. Quem já executou `20260912_block_rounds.sql` precisa executar `20260914_block_cashout_history.sql`, que adiciona o histórico demo e a regra de cinco limpezas sem redefinir saldos existentes. Para a criação automática da influenciadora com a primeira campanha, aplique também `20260923_affiliate_campaign.sql` antes de publicar o backend. Configure `PAYMENT_PROVIDER=amplopay` e as credenciais do provedor para Pix de contas reais; falhas de configuração não habilitam saldo simulado.
 
@@ -77,3 +77,9 @@ Após um novo cadastro, o primeiro acesso ao lobby abre uma sugestão de depósi
 No painel de aquisição, **Criar influenciadora e link** cadastra a influenciadora e sua primeira campanha juntas. O nome da campanha é opcional (padrão: “Divulgação inicial”) e o investimento pode ser informado para acompanhar o resultado. O link aparece pronto para copiar, no formato `https://SEU-DOMINIO/?ref=CODIGO`. Cada nova divulgação pode ter uma campanha e um link diferentes para a mesma influenciadora.
 
 O link associa cliques, cadastros e depósitos pagos à campanha; não concede comissão, bônus nem saldo à influenciadora. A origem segue o primeiro clique válido guardado por até 30 dias no navegador. Aplique a [migração incremental](backend/db/migrations/20260923_affiliate_campaign.sql) no SQL Editor do Supabase antes do deploy; ela preserva dados e saldos existentes. Não reaplique o `schema.sql` em um banco já utilizado.
+
+## Saldo da conta de teste
+
+A conta proprietária definida em `ADMIN_USERNAME` começa com R$ 100 de saldo de teste. A aposta reduz esse saldo ao iniciar e o resgate confirmado o aumenta. Exemplo: R$ 100 − R$ 30 + R$ 84 = R$ 154. O saldo fica salvo no banco, separado da carteira real. Depósitos simulados repõem apenas créditos de teste.
+
+Antes do deploy, aplique [20260924_demo_balance.sql](backend/db/migrations/20260924_demo_balance.sql). A identificação visível passa de “Demo” para “Modo de teste”, mantendo claros o saldo simulado e as regras simplificadas. Histórico anterior não altera retroativamente o crédito inicial.

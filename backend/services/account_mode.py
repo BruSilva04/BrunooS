@@ -15,7 +15,7 @@ def is_demo_user(user: dict) -> bool:
 
 
 def account_balance(user: dict) -> float:
-    """Present the owner's demo credit without changing the persisted wallet."""
+    """Present persistent test credit separately from the real wallet."""
     if is_demo_user(user):
-        return DEMO_BALANCE
+        return float(user.get("demo_balance", DEMO_BALANCE))
     return float(user.get("balance", 0) or 0)

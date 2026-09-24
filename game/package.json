@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "test": "npm run test:block && npm run test:api && npm run test:ledger && npm run test:flow && npm run test:generation && npm run test:history && npm run test:welcome && npm run test:acquisition && npm run test:admin && npm run test:affiliate-ledger",
+    "test": "npm run test:block && npm run test:api && npm run test:ledger && npm run test:flow && npm run test:generation && npm run test:history && npm run test:welcome && npm run test:acquisition && npm run test:admin && npm run test:affiliate-ledger && npm run test:demo-ledger",
     "test:block": "node tests/blockPuzzleLogic.test.mjs",
     "test:api": "node tests/apiSession.test.mjs",
     "test:ledger": "node tests/blockLedger.test.mjs",
@@ -17,6 +17,7 @@
     "test:acquisition": "node tests/acquisitionFlow.test.mjs",
     "test:admin": "node --experimental-vm-modules tests/adminCampaignFlow.test.mjs",
     "test:affiliate-ledger": "node tests/affiliateCampaignLedger.test.mjs",
+    "test:demo-ledger": "node tests/demoBalanceLedger.test.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

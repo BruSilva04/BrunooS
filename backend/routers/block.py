@@ -97,12 +97,12 @@ def unavailable(exc):
 async def record_demo_result(payload: DemoResultRequest, authorization: str | None = Header(default=None)):
     user = await current_player(authorization)
     if not is_demo_user(user):
-        raise HTTPException(403, "Histórico demo é exclusivo da conta demo do administrador.")
+        raise HTTPException(403, "Histórico de teste é exclusivo da conta de teste do administrador.")
     bet_cents = int(payload.bet * 100)
     if (bet_cents not in ALLOWED_BETS_CENTS or payload.total_clears > payload.moves * 16
             or payload.best_combo > payload.total_clears
             or (payload.status == 'won' and payload.total_clears < CASHOUT_CLEARS)):
-        raise HTTPException(422, "Resultado demo inválido.")
+        raise HTTPException(422, "Resultado de teste inválido.")
     progress = {"moves": payload.moves, "total_clears": payload.total_clears}
     try:
         saved = await save_demo_round({
@@ -113,13 +113,14 @@ async def record_demo_result(payload: DemoResultRequest, authorization: str | No
             "payout": payout_cents(bet_cents, progress) / 100 if payload.status == 'won' else 0,
         })
         if not saved:
-            raise HTTPException(409, "Não foi possível identificar esta partida demo.")
-        return {"saved": True, "round_id": saved["round_id"], "demo_mode": True}
+            raise HTTPException(409, "Não foi possível identificar esta partida de teste.")
+        return {"saved": True, "round_id": saved["round_id"], "demo_mode": True,
+                "balance": float(saved.get("balance", account_balance(user)))}
     except HTTPException:
         raise
     except Exception as exc:
         logger.exception("Demo history persistence failed")
-        raise HTTPException(503, "Histórico demo indisponível. O resultado será sincronizado ao reconectar.") from exc
+        raise HTTPException(503, "Histórico de teste indisponível. O resultado será sincronizado ao reconectar.") from exc
 
 
 @router.post("/rounds")
@@ -129,7 +130,19 @@ async def start_round(payload: StartRequest, authorization: str | None = Header(
     if bet_cents not in ALLOWED_BETS_CENTS:
         raise HTTPException(422, "Valor de aposta inválido.")
     if is_demo_user(user):
-        return {"demo_mode": True, "bet": bet_cents / 100, "balance": account_balance(user)}
+        try:
+            result = await call_round_rpc("start_block_demo_round", {
+                "p_user_id": str(user["id"]), "p_round_id": str(payload.request_id),
+                "p_bet": float(payload.bet),
+            })
+            if not result.get("ok"):
+                message = "Saldo de teste insuficiente." if result.get("reason") == "insufficient_balance" else "Não foi possível iniciar esta partida de teste."
+                raise HTTPException(409, message)
+            return {"demo_mode": True, "bet": bet_cents / 100, "balance": float(result["balance"])}
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise unavailable(exc) from exc
     seed = generate_server_seed()
     try:
         result = await call_round_rpc("start_block_round", {
@@ -146,7 +159,7 @@ async def start_round(payload: StartRequest, authorization: str | None = Header(
 
 async def owned_round(user, round_id):
     if is_demo_user(user):
-        raise HTTPException(403, "A conta demo não liquida rodadas com saldo real.")
+        raise HTTPException(403, "A conta de teste não liquida rodadas com saldo real.")
     result = await find_round(user["id"], str(round_id))
     if not result:
         raise HTTPException(404, "Rodada não encontrada.")
@@ -157,7 +170,7 @@ async def owned_round(user, round_id):
 async def read_round(round_id: UUID, authorization: str | None = Header(default=None)):
     user = await current_player(authorization)
     if is_demo_user(user):
-        raise HTTPException(403, "A conta demo não liquida rodadas com saldo real.")
+        raise HTTPException(403, "A conta de teste não liquida rodadas com saldo real.")
     try:
         return rpc_snapshot(await call_round_rpc("read_block_round", {
             "p_user_id": str(user["id"]), "p_round_id": str(round_id),

@@ -159,10 +159,38 @@ class BlockAPI(unittest.TestCase):
                     response = self.post('/rounds', {"request_id": str(uuid4()), "bet": 30})
                     self.assertEqual(response.status_code, 200)
                     self.assertTrue(response.json()["demo_mode"])
-                    self.assertEqual(response.json()["balance"], 100)
+                    self.assertEqual(response.json()["balance"], 70)
                     self.assertEqual(self.user['balance'], stored_balance)
-        block.call_round_rpc.assert_not_awaited()
+        self.assertEqual(block.call_round_rpc.await_count, 3)
+        self.assertTrue(all(call.args[0] == 'start_block_demo_round' for call in block.call_round_rpc.await_args_list))
         block.find_round.assert_not_awaited()
+
+    def test_owner_start_rejects_insufficient_test_balance_and_database_failure(self):
+        self.user.update(username='owner', role='admin')
+        with patch.dict(os.environ, {'ADMIN_USERNAME': 'owner'}):
+            block.call_round_rpc.return_value = {'ok': False, 'reason': 'insufficient_balance'}
+            response = self.post('/rounds', {'request_id': str(uuid4()), 'bet': 500})
+            self.assertEqual(response.status_code, 409)
+            block.call_round_rpc.side_effect = RuntimeError('missing test ledger')
+            with patch.object(block.logger, 'exception'):
+                response = self.post('/rounds', {'request_id': str(uuid4()), 'bet': 30})
+            self.assertEqual(response.status_code, 503)
+            self.assertNotIn('demo_mode', response.json())
+
+    def test_owner_simulated_deposit_never_credits_real_wallet(self):
+        self.user.update(username='owner', role='admin')
+        intent_id = str(uuid4())
+        intent = {'id': intent_id, 'provider': 'sandbox', 'user_id': self.user['id']}
+        with patch.dict(os.environ, {'ADMIN_USERNAME': 'owner'}), patch.object(
+            wallet, 'current_user', new=AsyncMock(return_value=self.user),
+        ), patch.object(wallet, 'get_payment_intent', new=AsyncMock(return_value=intent)), patch.object(
+            wallet, 'call_round_rpc', new=AsyncMock(return_value={'ok': True, 'intent': intent, 'balance': 140}),
+        ) as credit, patch.object(wallet, 'confirm_payment_intent', new=AsyncMock()) as real_credit:
+            response = self.client.post('/api/wallet/deposit-intents/' + intent_id + '/sandbox-confirm', headers=self.headers)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['balance'], 140)
+        credit.assert_awaited_once_with('confirm_block_demo_deposit', {'p_user_id': self.user['id'], 'p_intent_id': intent_id})
+        real_credit.assert_not_awaited()
 
     def test_other_admin_is_real(self):
         self.user.update(role='admin')
@@ -234,7 +262,7 @@ class BlockAPI(unittest.TestCase):
 
     def test_demo_history_only_accepts_the_demo_owner_without_wallet_writes(self):
         body = {'request_id': str(uuid4()), 'bet': 30, 'status': 'won', 'moves': 8, 'total_clears': 5, 'best_combo': 2}
-        with patch.object(block, 'save_demo_round', new=AsyncMock(return_value={'round_id': body['request_id']})) as save:
+        with patch.object(block, 'save_demo_round', new=AsyncMock(return_value={'round_id': body['request_id'], 'balance': 154})) as save:
             self.assertEqual(self.post('/demo-results', body).status_code, 403)
             save.assert_not_awaited()
             self.user.update(username='owner', role='admin')
@@ -242,6 +270,7 @@ class BlockAPI(unittest.TestCase):
                 result = self.post('/demo-results', body)
             self.assertEqual(result.status_code, 200)
             self.assertTrue(result.json()['saved'])
+            self.assertEqual(result.json()['balance'], 154)
             self.assertEqual(save.call_args.args[0]['payout'], 84)
             self.assertEqual(save.call_args.args[0]['user_id'], self.user['id'])
             block.call_round_rpc.assert_not_awaited()

@@ -40,7 +40,7 @@ export default class MenuScene extends Phaser.Scene {
 
   _drawHeader() {
     this._button(62, 38, 88, 36, '‹ Lobby', false, () => this.scene.start('Lobby'));
-    this._text(W - 22, 25, this.demoMode ? 'Saldo demo' : 'Saldo da conta', {
+    this._text(W - 22, 25, this.demoMode ? 'Saldo de teste' : 'Saldo da conta', {
       fontFamily: 'Arial, sans-serif', fontSize: '11px', color: '#b8c4df',
     }).setOrigin(1, 0);
     this._text(W - 22, 41, this._money(state.balance), {
@@ -86,7 +86,7 @@ export default class MenuScene extends Phaser.Scene {
     this.betText = this._text(x + 20, y + 42, this._money(this.bet), {
       fontSize: '34px', fontFamily: 'Arial, sans-serif', fontStyle: 'bold', color: '#f4f7ff',
     });
-    this._text(x + width - 20, y + 23, this.demoMode ? 'Demo' : 'Real', {
+    this._text(x + width - 20, y + 23, this.demoMode ? 'Teste' : 'Real', {
       fontSize: '11px', fontFamily: 'Arial, sans-serif', fontStyle: 'bold',
       color: '#67e8f9', backgroundColor: '#1a2340', padding: { x: 9, y: 6 },
     }).setOrigin(1, 0);
@@ -108,7 +108,7 @@ export default class MenuScene extends Phaser.Scene {
       this.betButtons.push({ value, bg, label, x: bx, y: by });
     });
     this._refreshChips();
-    this._text(W / 2, y + 163, this.demoMode ? 'Valor fictício. Seu saldo não muda.' : state.activeBlockRound ? 'Rodada em andamento. Sem nova cobrança.' : 'A aposta será debitada do saldo ao iniciar.', {
+    this._text(W / 2, y + 163, this.demoMode ? 'O valor será descontado do saldo de teste.' : state.activeBlockRound ? 'Rodada em andamento. Sem nova cobrança.' : 'A aposta será debitada do saldo ao iniciar.', {
       fontSize: '12px', fontFamily: 'Arial, sans-serif', color: '#b8c4df',
       align: 'center', wordWrap: { width: width - 32 },
     }).setOrigin(0.5);
@@ -129,7 +129,7 @@ export default class MenuScene extends Phaser.Scene {
   _drawPlayButton() {
     this.playLabel = this._button(W / 2, 534, W - 44, 56, '', true, () => {
       if (this.launchLocked) return;
-      if (!this.demoMode && !state.activeBlockRound && state.balance < this.bet) {
+      if (!state.activeBlockRound && state.balance < this.bet) {
         this.scene.start('Lobby', { tab: 'promo', notice: 'Saldo insuficiente para a aposta selecionada.' });
         return;
       }
@@ -142,7 +142,7 @@ export default class MenuScene extends Phaser.Scene {
     this._refreshPlayLabel();
     this._text(W / 2, 604, [
       'Arraste as peças e complete linhas ou colunas.',
-      this.demoMode ? 'Demo com peças simples e nível fácil.' : 'Novas sequências podem trazer peças sem encaixe.',
+      this.demoMode ? 'Modo de teste com peças simples e nível fácil.' : 'Novas sequências podem trazer peças sem encaixe.',
       'Complete 5 linhas ou colunas para liberar o resgate.',
     ], {
       fontSize: '13px', fontFamily: 'Arial, sans-serif', color: '#b8c4df',
@@ -168,7 +168,7 @@ export default class MenuScene extends Phaser.Scene {
   _refreshPlayLabel() {
     if (!this.playLabel) return;
     this.playLabel.setText(state.activeBlockRound ? 'Retomar rodada'
-      : this.demoMode ? 'Jogar demo'
+      : this.demoMode ? (state.balance >= this.bet ? 'Jogar teste' : 'Adicionar saldo de teste')
         : state.balance >= this.bet ? `Jogar por ${this._money(this.bet)}` : 'Adicionar saldo');
   }
 

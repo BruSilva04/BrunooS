@@ -1,6 +1,6 @@
 # Migração do Block Rush para as contas de produção
 
-Roteiro de infraestrutura conferido em 20/09/2026, com base no commit `4582049` e nas referências oficiais citadas abaixo. Atualizado em 23/09/2026 para incluir a migração de criação conjunta de influenciadora e campanha. Os exemplos são placeholders; substitua pelos valores das suas contas. Este documento não confirma o estado dos projetos nos painéis.
+Roteiro de infraestrutura conferido em 20/09/2026, com base no commit `4582049` e nas referências oficiais citadas abaixo. Atualizado em 24/09/2026 para incluir as migrações de criação conjunta de influenciadora e campanha e de saldo persistente de teste. Os exemplos são placeholders; substitua pelos valores das suas contas. Este documento não confirma o estado dos projetos nos painéis.
 
 ## 1. Escolha o caminho antes de alterar o banco
 
@@ -66,6 +66,7 @@ Use este caminho somente se confirmou que os registros atuais são descartáveis
 | 2 | [20260912_block_rounds.sql](../backend/db/migrations/20260912_block_rounds.sql) |
 | 3 | [20260914_block_cashout_history.sql](../backend/db/migrations/20260914_block_cashout_history.sql) |
 | 4 | [20260923_affiliate_campaign.sql](../backend/db/migrations/20260923_affiliate_campaign.sql) |
+| 5 | [20260924_demo_balance.sql](../backend/db/migrations/20260924_demo_balance.sql) |
 
 **`schema.sql` contém uma reconciliação que recalcula o saldo de não administradores a partir do ledger. Não o execute em banco com dados que precisam ser preservados, nem depois de restaurar um backup.** O segundo arquivo também restaura uma versão anterior da função de resgate: se precisar reaplicá-lo, aplique o terceiro depois.
 
@@ -102,7 +103,7 @@ WHERE schemaname = 'public'
   AND tablename IN (
     'users', 'rounds', 'wallet_transactions', 'payment_intents',
     'withdrawal_requests', 'operator_settlements', 'affiliates',
-    'campaigns', 'acquisition_clicks', 'block_demo_rounds'
+    'campaigns', 'acquisition_clicks', 'block_demo_rounds', 'block_demo_stakes'
   )
 ORDER BY tablename;
 
@@ -111,12 +112,13 @@ FROM pg_proc
 WHERE pronamespace = 'public'::regnamespace
   AND proname IN (
     'adjust_wallet_balance', 'start_block_round', 'commit_block_round',
-    'read_block_round', 'read_lobby_snapshot', 'create_affiliate_with_campaign'
+    'read_block_round', 'read_lobby_snapshot', 'create_affiliate_with_campaign',
+    'start_block_demo_round', 'settle_block_demo_round', 'confirm_block_demo_deposit'
   )
 ORDER BY proname;
 ```
 
-Espera-se encontrar as dez tabelas e as seis funções. Existência não garante a versão correta: confirme também que as migrações de 14/09 e 23/09 foram aplicadas nessa ordem e valide as regras no aplicativo.
+Espera-se encontrar as onze tabelas e as nove funções. Existência não garante a versão correta: confirme também que as migrações de 14/09, 23/09 e 24/09 foram aplicadas nessa ordem e valide as regras no aplicativo.
 
 Confira também as permissões das funções. Para cada uma, `backend_pode` deve ser `true`, e `anon_pode` e `authenticated_pode` devem ser `false`:
 
@@ -131,7 +133,8 @@ JOIN pg_namespace n ON n.oid = p.pronamespace
 WHERE n.nspname = 'public'
   AND p.proname IN (
     'adjust_wallet_balance', 'start_block_round', 'commit_block_round',
-    'read_block_round', 'read_lobby_snapshot', 'create_affiliate_with_campaign'
+    'read_block_round', 'read_lobby_snapshot', 'create_affiliate_with_campaign',
+    'start_block_demo_round', 'settle_block_demo_round', 'confirm_block_demo_deposit'
   )
 ORDER BY p.proname;
 
@@ -142,7 +145,7 @@ WHERE n.nspname = 'public' AND c.relkind = 'r'
 ORDER BY c.relname;
 ```
 
-As dez tabelas do aplicativo devem ter `rls_ativo=true`. Se uma verificação falhar, confira a execução integral das migrações antes de liberar o ambiente; não tente resolver habilitando acesso público às funções financeiras.
+As onze tabelas do aplicativo devem ter `rls_ativo=true`. Se uma verificação falhar, confira a execução integral das migrações antes de liberar o ambiente; não tente resolver habilitando acesso público às funções financeiras.
 
 Se os dados foram copiados, compare contagens e valores por conta antes de permitir novas escritas. Uma soma total igual não prova que cada saldo está correto. Nunca inclua senhas, hashes, documentos ou tokens em prints compartilhados.
 
@@ -208,7 +211,7 @@ python3 -c 'import secrets; print(secrets.token_urlsafe(48))'
 
 Cole a saída apenas no painel privado do Render. Trocar `AUTH_SECRET` invalida os tokens atuais e exige novo login; não altera as senhas dos usuários. Preservar usuários depende de preservar `public.users`, não desse segredo. Se `AUTH_SECRET` não estava definido, o código usava a chave Supabase como segredo de assinatura: configurar um segredo novo também exigirá login novamente.
 
-**Administrador:** o startup cria/atualiza a conta de `ADMIN_USERNAME`; se `ADMIN_PASSWORD` estiver definido, sua senha é atualizada a cada início. Não use o username de um jogador. Em banco preservado, mudar `ADMIN_USERNAME` pode fazer o administrador antigo deixar de ser demo e usar seu saldo persistido. O bootstrap legado ainda cria saldo persistido de 100000; a demo exibe R$ 100 pelo código. Não altere saldos no SQL para tentar reproduzir o valor demonstrativo.
+**Administrador:** o startup cria/atualiza a conta de `ADMIN_USERNAME`; se `ADMIN_PASSWORD` estiver definido, sua senha é atualizada a cada início. Não use o username de um jogador. Em banco preservado, mudar `ADMIN_USERNAME` pode fazer o administrador antigo deixar de ser demo e usar seu saldo persistido. O bootstrap legado ainda cria saldo persistido de 100000; o modo de teste usa `users.demo_balance`, separado da carteira real, com crédito inicial de R$ 100 e atualização por aposta e resgate. Não altere a carteira real para reproduzir o saldo de teste.
 
 Enquanto dois backends compartilharem o banco, mantenha as configurações administrativas compatíveis: um reinício do serviço antigo com outro `ADMIN_PASSWORD`, `ADMIN_EMAIL` ou `ADMIN_PHONE` pode sobrescrever as novas informações. Se a conta já existe e não precisa trocar a senha, `ADMIN_PASSWORD` pode ficar ausente; num banco novo ele é necessário para criar o administrador.
 
@@ -285,8 +288,8 @@ Se também estiver mudando a conta Amplopay, trate as cobranças pendentes da co
 
 1. Confirme o commit publicado no frontend e no backend.
 2. Confira `/health`, `/health/db` e as funções/tabelas do banco.
-3. Faça login no administrador configurado: deve mostrar R$ 100 na demo e manter peças simples no nível fácil mesmo após várias jogadas.
-4. Jogue uma demo, volte ao lobby e recarregue: saldo demonstrativo permanece R$ 100 e o resultado deve sincronizar no histórico.
+3. Faça login no administrador configurado: deve mostrar “Modo de teste”, começar com R$ 100 no primeiro uso e manter peças simples no nível fácil mesmo após várias jogadas.
+4. Jogue uma partida de teste: a aposta deve descontar do saldo e o resgate deve creditar o prêmio. Volte ao lobby e recarregue: o saldo atualizado deve persistir e o resultado deve sincronizar no histórico.
 5. Crie uma conta comum de teste identificável: começa com saldo zero, sem indicação de demo, e não recebe os R$ 100 do administrador.
 6. Se estiver preservando usuários, confira login e dados de contas existentes, além dos saldos por usuário.
 7. Verifique no navegador que as requisições vão ao Render correto e que não há erro de CORS.

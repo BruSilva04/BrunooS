@@ -5,6 +5,7 @@ import hmac
 from fastapi import APIRouter, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from db.block_rounds import call_round_rpc
 from db.database import (
     adjust_user_balance,
     confirm_payment_intent,
@@ -335,7 +336,7 @@ async def sandbox_confirm_deposit(
 ):
     user = await current_user(authorization)
     if not is_demo_user(user):
-        raise HTTPException(403, "Confirmação de teste é exclusiva da conta demo do administrador.")
+        raise HTTPException(403, "Confirmação de teste é exclusiva da conta de teste do administrador.")
     intent = await get_payment_intent(intent_id)
     if not intent:
         raise HTTPException(status_code=404, detail="Deposito nao encontrado")
@@ -344,10 +345,15 @@ async def sandbox_confirm_deposit(
     if str(intent.get("user_id")) != str(user["id"]):
         raise HTTPException(status_code=403, detail="Sem permissao para confirmar este deposito")
 
-    updated = await confirm_payment_intent(intent_id, user["id"])
-    if not updated:
-        raise HTTPException(status_code=409, detail="Nao foi possivel confirmar o deposito")
-    return {"intent": updated}
+    try:
+        result = await call_round_rpc("confirm_block_demo_deposit", {
+            "p_user_id": str(user["id"]), "p_intent_id": intent_id,
+        })
+    except Exception as exc:
+        raise HTTPException(503, "Saldo de teste temporariamente indisponível.") from exc
+    if not result.get("ok"):
+        raise HTTPException(status_code=409, detail="Não foi possível confirmar o depósito de teste.")
+    return {"intent": result["intent"], "balance": result["balance"]}
 
 
 @router.post("/withdrawals")

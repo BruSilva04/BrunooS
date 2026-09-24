@@ -16,6 +16,8 @@ class DemoBalance(unittest.IsolatedAsyncioTestCase):
         return [
             ({**base, 'username': 'OWNER', 'role': 'admin'}, 100, True),
             ({**base, 'username': 'owner', 'role': 'player', 'permissions': {'admin': True}}, 100, True),
+            ({**base, 'username': 'owner', 'role': 'admin', 'demo_balance': 154}, 154, True),
+            ({**base, 'username': 'owner', 'role': 'admin', 'demo_balance': 0}, 0, True),
             ({**base, 'username': 'other-admin', 'role': 'admin'}, 37.5, False),
             ({**base, 'username': 'player', 'role': 'player', 'demo_mode': True}, 37.5, False),
             ({**base, 'username': 'owner', 'role': 'player', 'permissions': {}}, 37.5, False),

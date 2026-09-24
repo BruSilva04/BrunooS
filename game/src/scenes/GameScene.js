@@ -321,6 +321,8 @@ export default class GameScene extends Phaser.Scene {
     this._updateModeLabels();
     this._drawCashoutButton();
     try {
+      if (this.demoMode) await flushDemoHistory();
+      if (this.lifecycle !== lifecycle) return;
       const response = await startBlockRound(this.bet, this.startRequestId);
       if (this.lifecycle !== lifecycle) return;
       this.demoMode = response.demo_mode === true;
@@ -345,11 +347,11 @@ export default class GameScene extends Phaser.Scene {
 
   _updateModeLabels() {
     this.betCaption?.setText(this.demoMode ? 'VALOR SIMULADO' : 'APOSTA');
-    this.valueCaption?.setText(this.demoMode ? 'VALOR DEMO' : 'RESGATE');
+    this.valueCaption?.setText('RESGATE');
     this.betText?.setText(money(this.bet));
     this.balanceText?.setText(money(state.balance));
     this.modeText?.setText(this.gameState === GAME_STATE.STARTING ? 'Carregando rodada…'
-      : this.demoMode ? 'DEMO ADMIN · sem movimentação de saldo real' : 'SALDO REAL · rodada salva automaticamente');
+      : this.demoMode ? 'Modo de teste · saldo simulado · regras simplificadas' : 'SALDO REAL · rodada salva automaticamente');
   }
 
   _acceptRound(response) {
@@ -771,7 +773,7 @@ export default class GameScene extends Phaser.Scene {
       this.cashoutGfx.strokeRoundedRect(x, y, width, height, 10);
       this.cashoutLabel.setText(`Resgatar ${money(this._currentValue())}`);
       this.cashoutLabel.setColor('#090b1a');
-      this.cashoutSub.setText(this.demoMode ? 'Demo: sem movimentar saldo real' : 'Crédito no saldo após confirmação');
+      this.cashoutSub.setText(this.demoMode ? 'Modo de teste: sem dinheiro real' : 'Crédito no saldo após confirmação');
       this.cashoutSub.setColor('#20233f');
       return;
     }
@@ -865,7 +867,7 @@ export default class GameScene extends Phaser.Scene {
     }).setOrigin(0.5);
 
     const note = this._text(W / 2, py + 218, this.demoMode
-      ? 'Modo demo admin: nenhum saldo real foi debitado ou creditado.'
+      ? 'Modo de teste: aguardando atualização do saldo.'
       : won ? `Resgate creditado. Saldo: ${money(state.balance)}` : `Aposta encerrada sem resgate. Saldo: ${money(state.balance)}`, {
       fontSize: '12px',
       fontFamily: 'Arial, sans-serif',
@@ -898,11 +900,17 @@ export default class GameScene extends Phaser.Scene {
     if (this.demoHistorySaving) return;
     this.demoHistorySaving = true;
     const lifecycle = this.lifecycle;
-    note.setText('Sincronizando partida demo…');
+    note.setText('Confirmando resultado de teste…');
     try {
       queueDemoResult(result);
-      await flushDemoHistory();
-      if (this.lifecycle === lifecycle) note.setText('Partida demo salva no histórico. Sem movimentar saldo real.');
+      const response = await flushDemoHistory();
+      if (this.lifecycle === lifecycle) {
+        if (typeof response?.balance === 'number' && Number.isFinite(response.balance)) {
+          state.balance = response.balance;
+          this.balanceText?.setText(money(state.balance));
+        }
+        note.setText(`Modo de teste · Saldo: ${money(state.balance)}`);
+      }
     } catch {
       if (this.lifecycle === lifecycle) note.setText('Histórico pendente. Toque aqui para tentar sincronizar novamente.');
     } finally {
@@ -958,7 +966,7 @@ export default class GameScene extends Phaser.Scene {
     const body = this._text(W / 2, py + 142, [
       'Arraste as peças para o tabuleiro.',
       'Complete linhas ou colunas para limpar.',
-      this.demoMode ? 'Demo com peças simples e nível fácil.' : 'Novas peças podem chegar sem encaixe.',
+      this.demoMode ? 'Modo de teste com peças simples e nível fácil.' : 'Novas peças podem chegar sem encaixe.',
       `Após ${BLOCK_GAME_CONFIG.clearsToUnlockCashout} limpezas, o resgate aparece.`,
       'Se nenhuma peça couber, a rodada termina.',
     ].join('\n'), {

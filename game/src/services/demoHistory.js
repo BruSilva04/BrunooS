@@ -20,22 +20,24 @@ export async function flushDemoHistory() {
   const userId = getStoredUser()?.id;
   if (!userId) return;
   if (activeFlush?.userId === userId) {
-    await activeFlush.promise;
+    const response = await activeFlush.promise;
     if (getStoredUser()?.id === userId && keysFor(userId).length) return flushDemoHistory();
-    return;
+    return getStoredUser()?.id === userId ? response : undefined;
   }
   if (!keysFor(userId).length) return;
   const entry = { userId };
   entry.promise = (async () => {
+    let latestResponse;
     while (getStoredUser()?.id === userId) {
       const key = keysFor(userId)[0];
-      if (!key) return;
+      if (!key) return latestResponse;
       const result = JSON.parse(window.localStorage.getItem(key));
       const response = await recordDemoRound(result);
       if (response?.saved !== true || response.round_id !== result.request_id) {
         throw new Error('Não foi possível confirmar o histórico desta partida.');
       }
       window.localStorage.removeItem(key);
+      latestResponse = response;
     }
   })().finally(() => { if (activeFlush === entry) activeFlush = null; });
   activeFlush = entry;

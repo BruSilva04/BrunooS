@@ -23,15 +23,9 @@ async def call_round_rpc(name, params):
 
 
 async def save_demo_round(data):
-    def write():
-        client = get_supabase_client()
-        # Results are immutable: retries after a lost response never duplicate
-        # a match or overwrite an earlier result, including from another user.
-        client.table("block_demo_rounds").upsert(
-            data, on_conflict="round_id", ignore_duplicates=True,
-        ).execute()
-        return client.table("block_demo_rounds").select("round_id").eq(
-            "round_id", data["round_id"],
-        ).eq("user_id", data["user_id"]).limit(1).execute()
-    response = await anyio.to_thread.run_sync(write)
-    return response.data[0] if response.data else None
+    result = await call_round_rpc("settle_block_demo_round", {
+        "p_user_id": data["user_id"], "p_round_id": data["round_id"],
+        "p_bet": data["bet"], "p_status": data["status"], "p_moves": data["moves"],
+        "p_total_clears": data["total_clears"], "p_best_combo": data["best_combo"],
+    })
+    return result if result.get("ok") else None

@@ -26,8 +26,8 @@ record = async payload => { calls.push(payload.request_id); throw Error('offline
 queueDemoResult(result('one'));
 await assert.rejects(flushDemoHistory(), /offline/);
 assert.equal(entries.size, 1, 'failed synchronization keeps the result for a later visit');
-record = async payload => { calls.push(payload.request_id); return { saved: true, round_id: payload.request_id }; };
-await flushDemoHistory();
+record = async payload => { calls.push(payload.request_id); return { saved: true, round_id: payload.request_id, balance: 154 }; };
+assert.equal((await flushDemoHistory()).balance,154,'confirmation returns the persisted test balance');
 assert.deepEqual(calls, ['one', 'one'], 'retry keeps the same match identifier');
 assert.equal(entries.size, 0);
 

@@ -45,3 +45,14 @@ WHERE p.pronamespace = 'public'::regnamespace
 ```
 
 O resultado deve ser uma linha, com `backend_pode=true` e os outros dois campos `false`. Sem esta migração, a criação conjunta responde 503; não existe tentativa alternativa que deixe uma influenciadora sem campanha. Aplique o SQL antes de publicar o backend e o frontend. Para um banco novo e vazio, siga a ordem completa no [guia de produção](../../../docs/MIGRACAO_PRODUCAO.md).
+
+
+## Saldo persistente da conta de teste
+
+Aplique [20260924_demo_balance.sql](20260924_demo_balance.sql) antes de publicar esta versão. Ela adiciona `users.demo_balance` com crédito inicial de R$ 100 e cria as reservas das partidas de teste, sem atualizar `users.balance`, bônus, rollover ou lançamentos financeiros reais.
+
+A aposta de teste é descontada uma vez ao iniciar; uma vitória soma o resgate confirmado e uma derrota mantém o débito. Repetições da mesma requisição não duplicam operações. O saldo persiste ao sair e entrar novamente. A confirmação de um depósito simulado repõe apenas o saldo de teste; não usa o provedor de pagamento real.
+
+Resultados antigos ou pendentes, iniciados antes desta atualização, continuam no histórico e não geram crédito retroativo. O tabuleiro de teste continua local: fechar uma partida iniciada não devolve automaticamente a aposta. As três funções novas (`start_block_demo_round`, `settle_block_demo_round` e `confirm_block_demo_deposit`) são restritas ao backend, que também valida a conta proprietária configurada em `ADMIN_USERNAME`.
+
+A interface usa “Modo de teste”, com indicação de saldo simulado e regras simplificadas. As contas dos jogadores comuns continuam usando o saldo e as regras reais.
